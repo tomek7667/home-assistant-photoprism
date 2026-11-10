@@ -6,7 +6,7 @@ from urllib.parse import unquote
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, RANDOM
 
 _SLIDESHOW = "album_slideshow"
 _SOURCE_PREFIX = f"media-source://{DOMAIN}"
@@ -24,8 +24,13 @@ async def async_refresh(hass: HomeAssistant, gone: set[str] | None = None) -> No
     gone = {g.lower() for g in gone or ()}
     ent_reg = er.async_get(hass)
     for entry in hass.config_entries.async_loaded_entries(_SLIDESHOW):
-        if not str(entry.data.get("media_content_id", "")).startswith(_SOURCE_PREFIX):
+        content_id = str(entry.data.get("media_content_id", ""))
+        if not content_id.startswith(_SOURCE_PREFIX):
             continue
+        # After a deletion, reloading a Random album would draw a whole new selection and
+        # throw away the slideshow's preloaded slides; skipping ahead is enough there
+        # (a deleted photo that comes up again is skipped by the slideshow itself).
+        reload = not (gone and content_id.endswith(f"/{RANDOM}"))
         if gone:
             for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
                 if ent.domain != "camera" or (state := hass.states.get(ent.entity_id)) is None:
@@ -33,4 +38,5 @@ async def async_refresh(hass: HomeAssistant, gone: set[str] | None = None) -> No
                 url = unquote(str(state.attributes.get("current_url", ""))).lower()
                 if any(name in url for name in gone):
                     await hass.services.async_call(_SLIDESHOW, "next_slide", {"entry_id": entry.entry_id})
-        await hass.services.async_call(_SLIDESHOW, "refresh_album", {"entry_id": entry.entry_id})
+        if reload:
+            await hass.services.async_call(_SLIDESHOW, "refresh_album", {"entry_id": entry.entry_id})

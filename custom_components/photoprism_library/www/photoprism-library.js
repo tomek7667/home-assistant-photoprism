@@ -4,11 +4,13 @@
  * - Adds a hover "delete permanently" button to photo previews opened from the
  *   media browser (only for photos of this integration, only for admins, only
  *   when deleting is enabled in the integration options).
+ * - Defines `custom:photoprism-library-viewer`: a fast in-browser photo browser
+ *   (instant previous/next, keyboard, swipe, delete) for a library folder.
  * - Defines `custom:photoprism-library-slideshow`: an Album Slideshow card with
  *   previous/next arrows on the photo, a loading spinner, the year the photo
  *   was taken and the delete button.
  */
-const VERSION = "1.2.1";
+const VERSION = "1.3.0";
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
@@ -251,8 +253,44 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
     this._host = host;
     this._deleteBtn = null;
     this._frame = undefined;
+    this._frameUrls = new Map(); // frame_id -> photo URL, to know which photo is on screen
+    this._observer?.disconnect();
+    this._observer = null;
     this._syncOverlay();
     this._syncDelete();
+  }
+
+  /** URL of the photo the inner card is showing right now (it swaps only after loading and fading). */
+  _displayedUrl() {
+    const img = this._inner?.shadowRoot?.querySelector("img.layer.show");
+    const match = img?.getAttribute("src")?.match(/[?&]_?frame=(\d+)/);
+    if (match && this._frameUrls.has(Number(match[1]))) return this._frameUrls.get(Number(match[1]));
+    return img ? null : this._hass?.states[this._config.entity]?.attributes?.current_url;
+  }
+
+  /** Follow the inner card's picture swaps, so the year and the spinner change with the picture. */
+  _observeInner() {
+    const root = this._inner?.shadowRoot;
+    if (this._observer || !root) return;
+    let shown = null;
+    this._observer = new MutationObserver(() => {
+      const url = this._displayedUrl();
+      if (url === shown) return;
+      shown = url;
+      this._host.classList.remove("ppl-loading");
+      clearTimeout(this._spinnerTimeout);
+      this._renderYear(url);
+    });
+    this._observer.observe(root, { subtree: true, attributes: true, attributeFilter: ["class", "src"] });
+  }
+
+  disconnectedCallback() {
+    this._observer?.disconnect();
+    this._observer = null;
+  }
+
+  connectedCallback() {
+    if (this._inner) this._observeInner();
   }
 
   _navButton(cls, icon, direction) {
@@ -305,17 +343,21 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
   _syncOverlay() {
     if (!this._host || !this._hass) return;
     const attrs = this._hass.states[this._config.entity]?.attributes || {};
+    if (attrs.frame_id != null && attrs.current_url) {
+      this._frameUrls.set(Number(attrs.frame_id), attrs.current_url);
+      while (this._frameUrls.size > 40) this._frameUrls.delete(this._frameUrls.keys().next().value);
+    }
+    this._observeInner();
     if (attrs.frame_id === this._frame) return;
     const first = this._frame === undefined;
     this._frame = attrs.frame_id;
-    // Change the label together with the picture's cross-fade, then stop the spinner.
-    const delay = first ? 0 : Number(this._config.duration ?? 600) / 2;
+    // The observer updates the year when the picture really changes; this is the fallback.
     clearTimeout(this._overlayTimer);
     this._overlayTimer = setTimeout(() => {
       this._host.classList.remove("ppl-loading");
       clearTimeout(this._spinnerTimeout);
-      this._renderYear(attrs.current_url);
-    }, delay);
+      this._renderYear(this._displayedUrl() ?? attrs.current_url);
+    }, first ? 0 : Number(this._config.duration ?? 600) + 1500);
   }
 
   _renderYear(url) {
@@ -336,9 +378,10 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
     if (!this._host || !this._hass) return;
     const allowed = this._config.delete_button && (await deleteAllowed(this._hass));
     if (allowed && !this._deleteBtn) {
+      // Delete the photo that is on screen, not the one the slideshow is about to show.
       this._deleteBtn = deleteButton(
         this._hass,
-        () => photoPath(this._hass.states[this._config.entity]?.attributes?.current_url),
+        () => photoPath(this._displayedUrl()),
         undefined,
         this._config.language,
       );
@@ -361,6 +404,284 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
     const entity = Object.keys(hass.states).find((e) => e.startsWith("camera.album_slideshow")) || "";
     return { entity, transition: "fade", duration: 1200, show_year: true };
   }
+}
+
+/* ---- Viewer card: fast browsing and tidying up ---------------------------- */
+
+const VIEWER_CSS = `
+  ha-card { overflow: hidden; height: 100%; }
+  .ppl-viewer { position: relative; width: 100%; background: #000; outline: none; overflow: hidden; touch-action: pan-y; }
+  .ppl-viewer .bg {
+    position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px);
+    object-fit: cover; filter: blur(30px) brightness(0.5); opacity: 0; transition: opacity 0.2s;
+  }
+  .ppl-viewer .photo {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+    opacity: 0; transition: opacity 0.15s ease;
+  }
+  .ppl-viewer .photo.show, .ppl-viewer .bg.show { opacity: 1; }
+  .ppl-count {
+    position: absolute; z-index: 4; left: 12px; top: 12px; padding: 3px 9px; border-radius: 12px;
+    color: #fff; font-size: 13px; background: rgba(0, 0, 0, 0.45); pointer-events: none;
+  }
+  .ppl-count:empty { display: none; }
+  .ppl-shuffle { top: 12px; right: 64px; width: 44px; height: 44px; margin-top: 0; }
+  .ppl-empty {
+    position: absolute; inset: 0; z-index: 3; display: none; align-items: center; justify-content: center;
+    padding: 24px; text-align: center; color: #ddd;
+  }
+  .ppl-viewer.is-empty .ppl-empty { display: flex; }
+`;
+const SHUFFLE_ICON = ICON(
+  "M14.83,13.41L13.42,14.82L16.55,17.95L14.5,20H20V14.5L17.96,16.54L14.83,13.41M14.5,4L16.54,6.04L4,18.59L5.41,20L17.96,7.46L20,9.5V4M10.59,9.17L5.41,4L4,5.41L9.17,10.58L10.59,9.17Z",
+);
+Object.assign(TEXT.en, { shuffle: "New random selection", empty: "No photos here", loadFailed: "Could not load the photos" });
+Object.assign(TEXT.pl, { shuffle: "Nowy losowy wybór", empty: "Brak zdjęć", loadFailed: "Nie udało się wczytać zdjęć" });
+const SOURCE = "media-source://photoprism_library";
+
+/**
+ * `custom:photoprism-library-viewer`: browses a library folder right in the browser.
+ * Photos are preloaded around the current one, so previous/next is instant; ← → and
+ * Delete work while the pointer is over the card, and swiping works on touch screens.
+ * The delete button always targets the photo on screen.
+ */
+class PhotoPrismLibraryViewer extends HTMLElement {
+  setConfig(config) {
+    this._config = { folder: "@random", show_year: true, delete_button: true, aspect_ratio: "16/9", autoplay: 0, ...config };
+    this._items = null;
+    this._index = 0;
+    this._token = 0;
+    this._render();
+    if (this._hass) this._load();
+  }
+
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (first && this._config) {
+      this._load();
+      this._syncDelete();
+    }
+  }
+
+  get _t() {
+    return text(this._hass || currentHass(), this._config.language);
+  }
+
+  _render() {
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    const ratio = String(this._config.aspect_ratio || "16/9").replace(":", "/");
+    this.shadowRoot.innerHTML = `<style>${BUTTON_CSS}${CARD_CSS}${VIEWER_CSS}</style>
+      <ha-card><div class="ppl-host ppl-viewer ppl-loading" style="aspect-ratio:${ratio}">
+        <img class="bg" alt=""><img class="photo" alt=""><img class="photo" alt="">
+        <div class="ppl-count"></div><div class="ppl-year"></div><div class="ppl-spinner"></div>
+        <div class="ppl-empty"></div>
+      </div></ha-card>`;
+    const host = this.shadowRoot.querySelector(".ppl-viewer");
+    this._host = host;
+    this._bg = host.querySelector(".bg");
+    this._layers = [...host.querySelectorAll(".photo")];
+    this._front = 0;
+    this._count = host.querySelector(".ppl-count");
+    this._year = host.querySelector(".ppl-year");
+    this._empty = host.querySelector(".ppl-empty");
+    this._deleteBtn = null;
+    host.append(this._button("ppl-nav prev", PREV_ICON, this._t.previous, () => this._step(-1)));
+    host.append(this._button("ppl-nav next", NEXT_ICON, this._t.next, () => this._step(1)));
+    if (this._config.folder === "@random") {
+      host.append(this._button("ppl-nav ppl-shuffle", SHUFFLE_ICON, this._t.shuffle, () => this._load()));
+    }
+    host.addEventListener("pointerenter", () => (this._hover = true));
+    host.addEventListener("pointerleave", () => (this._hover = false));
+    host.addEventListener("pointerdown", (ev) => (this._swipeX = ev.pointerType === "mouse" ? null : ev.clientX));
+    host.addEventListener("pointerup", (ev) => {
+      if (this._swipeX == null) return;
+      const dx = ev.clientX - this._swipeX;
+      this._swipeX = null;
+      if (Math.abs(dx) > 50) this._step(dx < 0 ? 1 : -1);
+    });
+  }
+
+  _button(cls, icon, label, onClick) {
+    const button = document.createElement("button");
+    button.className = cls;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.innerHTML = icon;
+    button.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+
+  connectedCallback() {
+    this._onKey ||= (ev) => {
+      if (!this._hover || ev.defaultPrevented || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+      const tag = ev.composedPath()[0]?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (ev.key === "ArrowRight") this._step(1);
+      else if (ev.key === "ArrowLeft") this._step(-1);
+      else if ((ev.key === "Delete" || ev.key === "Backspace") && this._deleteBtn) this._deleteBtn.click();
+      else return;
+      ev.preventDefault();
+    };
+    window.addEventListener("keydown", this._onKey);
+    this._restartAutoplay();
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("keydown", this._onKey);
+    clearInterval(this._autoplay);
+  }
+
+  _restartAutoplay() {
+    clearInterval(this._autoplay);
+    const seconds = Number(this._config?.autoplay) || 0;
+    if (seconds > 0) this._autoplay = setInterval(() => !this._hover && this._step(1), seconds * 1000);
+  }
+
+  async _load() {
+    if (!this._hass) return;
+    const token = ++this._token;
+    this._host.classList.add("ppl-loading");
+    const folder = String(this._config.folder || "").replace(/^\/+|\/+$/g, "");
+    try {
+      const res = await this._hass.callWS({
+        type: "media_source/browse_media",
+        media_content_id: folder ? `${SOURCE}/${folder}` : SOURCE,
+      });
+      if (token !== this._token) return;
+      this._items = (res.children || [])
+        .filter((c) => c.media_class === "image")
+        .map((c) => ({ id: c.media_content_id, path: c.media_content_id.slice(SOURCE.length + 1) }));
+    } catch (err) {
+      this._items = [];
+      this._showEmpty(`${this._t.loadFailed}: ${err?.message || err}`);
+      return;
+    }
+    this._show(0);
+  }
+
+  _showEmpty(message) {
+    this._host.classList.remove("ppl-loading");
+    this._host.classList.add("is-empty");
+    this._empty.textContent = message;
+    this._count.textContent = "";
+    this._year.innerHTML = "";
+    this._shown = null;
+    this._layers.forEach((l) => l.classList.remove("show"));
+    this._bg.classList.remove("show");
+  }
+
+  /** Resolve (signed URL) and decode a photo once; later calls reuse the promise. */
+  _preload(item) {
+    if (item.ready && Date.now() - item.readyAt > 5 * 3600 * 1000) item.ready = null; // signed URL ages out
+    if (!item.ready) item.readyAt = Date.now();
+    item.ready ||= this._hass
+      .callWS({ type: "media_source/resolve_media", media_content_id: item.id, expires: 6 * 3600 })
+      .then(
+        (res) =>
+          new Promise((resolve, reject) => {
+            const img = new Image();
+            img.decoding = "async";
+            img.onload = () => resolve(res.url);
+            img.onerror = () => reject(new Error("load failed"));
+            img.src = res.url;
+          }),
+      );
+    return item.ready;
+  }
+
+  _step(delta) {
+    if (this._items?.length) this._show(this._index + delta);
+    this._restartAutoplay();
+  }
+
+  async _show(index) {
+    const items = this._items;
+    if (!items?.length) {
+      this._showEmpty(this._t.empty);
+      return;
+    }
+    index = ((index % items.length) + items.length) % items.length;
+    this._index = index;
+    const item = items[index];
+    const token = ++this._token;
+    this._host.classList.add("ppl-loading");
+    let url;
+    try {
+      url = await this._preload(item);
+    } catch {
+      // Gone or unreadable (e.g. deleted elsewhere): drop it and show the next one.
+      if (token !== this._token) return;
+      const at = items.indexOf(item);
+      if (at >= 0) items.splice(at, 1);
+      this._show(index);
+      return;
+    }
+    if (token !== this._token) return; // a newer click won
+    this._host.classList.remove("is-empty", "ppl-loading");
+    const next = this._layers[1 - this._front];
+    next.src = url;
+    next.classList.add("show");
+    this._layers[this._front].classList.remove("show");
+    this._front = 1 - this._front;
+    this._bg.src = url;
+    this._bg.classList.add("show");
+    this._shown = item; // what the delete button acts on
+    this._count.textContent = `${index + 1} / ${items.length}`;
+    this._renderYear(item.path);
+    for (const k of [1, 2, 3, 4, 5, -1]) this._preload(items[(index + k + items.length) % items.length]).catch(() => {});
+  }
+
+  _renderYear(path) {
+    const year = this._config.show_year ? photoYear(path) : null;
+    this._year.innerHTML = year
+      ? `<b>${year}</b><span>${this._t.yearsAgo(new Date().getFullYear() - year)}</span>`
+      : "";
+  }
+
+  async _syncDelete() {
+    if (!this._config.delete_button || this._deleteBtn || !(await deleteAllowed(this._hass))) return;
+    this._deleteBtn = deleteButton(
+      this._hass,
+      () => this._shown?.path,
+      () => {
+        const gone = this._shown;
+        const at = this._items.indexOf(gone);
+        if (at < 0) return;
+        this._items.splice(at, 1);
+        this._show(at); // the next photo moves into this slot
+      },
+      this._config.language,
+    );
+    this._host.appendChild(this._deleteBtn);
+  }
+
+  getCardSize() {
+    return 8;
+  }
+
+  getGridOptions() {
+    return { columns: "full", rows: "auto" };
+  }
+
+  static getStubConfig() {
+    return { folder: "@random", show_year: true };
+  }
+}
+
+if (!customElements.get("photoprism-library-viewer")) {
+  customElements.define("photoprism-library-viewer", PhotoPrismLibraryViewer);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "photoprism-library-viewer",
+    name: "PhotoPrism Library viewer",
+    description: "Fast photo browser for a library folder (e.g. Random): instant previous/next, keyboard and swipe, delete.",
+    preview: false,
+  });
 }
 
 if (!customElements.get("photoprism-library-slideshow")) {

@@ -35,7 +35,7 @@ from .views import ImageView, ThumbView
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
 STATIC_URL = "/photoprism_library_static"
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 
 def _register_heif_opener() -> None:

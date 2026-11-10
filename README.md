@@ -109,6 +109,25 @@ language: en           # optional, defaults to your Home Assistant language (en,
 
 It sets Album Slideshow's `tap_pause_seconds` to 0 unless you set it yourself. Otherwise the picture freezes for 8 s after tapping it, and previous/next seems to lag. Set the slideshow's *Orientation mismatch mode* to `single` so each slide shows exactly one photo, and raise *Navigation buffer* to preload more slides for quick clicking.
 
+## Photo viewer card (fast browsing and tidying up)
+
+`custom:photoprism-library-viewer` browses a library folder right in the browser, without a slideshow integration. It preloads the photos around the current one, so previous/next is instant. It's the quickest way to go through photos and delete the ones you don't want:
+
+- **◀ ▶ arrows**, the **← → keys** and **Delete** while the pointer is over the card, and **swipe** on touch screens
+- a **12 / 500** counter and the **year** the photo was taken
+- **🔀** for a new random selection (for the `@random` folder)
+- the **delete button** (when deleting is enabled, admins only). It always acts on the photo on screen, and the next photo takes its place immediately
+
+```yaml
+type: custom:photoprism-library-viewer
+folder: "@random"      # or "@on_this_day", or a folder such as 2023/07
+show_year: true
+delete_button: true
+autoplay: 0            # seconds between photos, 0 = manual
+aspect_ratio: 16/9
+language: en           # optional
+```
+
 ## How it works
 
 | URL | |
