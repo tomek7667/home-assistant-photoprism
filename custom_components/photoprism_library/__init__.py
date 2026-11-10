@@ -35,7 +35,7 @@ from .views import ImageView, ThumbView
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
 STATIC_URL = "/photoprism_library_static"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 def _register_heif_opener() -> None:
@@ -96,8 +96,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "www"), False)]
         )
-        # Adds the delete button to photo previews and the slideshow card.
-        add_extra_js_url(hass, f"{STATIC_URL}/photoprism-library.js?v={VERSION}")
+        # Adds the delete button to photo previews and the slideshow card. The file's
+        # mtime in the URL makes browsers fetch a changed script instead of a cached one.
+        script = Path(__file__).parent / "www" / "photoprism-library.js"
+        mtime = await hass.async_add_executor_job(lambda: int(script.stat().st_mtime))
+        add_extra_js_url(hass, f"{STATIC_URL}/{script.name}?v={VERSION}-{mtime}")
         websocket.async_register(hass)
         hass.data[_REGISTERED] = True
 

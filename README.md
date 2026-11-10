@@ -90,7 +90,24 @@ transition: fade
 duration: 1500
 ```
 
-To get the delete button on the slideshow, use `custom:photoprism-library-slideshow` with the same options. It wraps the Album Slideshow card. Set the slideshow's *Orientation mismatch mode* to `single` so each slide shows exactly one photo.
+For a nicer card, use `custom:photoprism-library-slideshow` with the same options. It wraps the Album Slideshow card and adds:
+
+- **◀ ▶ arrows** on the photo (on hover) with a loading spinner, for fast previous/next
+- **the year the photo was taken** in the bottom-right corner, e.g. *2020 · 6 years ago* (great for On this day)
+- **the delete button** (when deleting is enabled, admins only)
+
+```yaml
+type: custom:photoprism-library-slideshow
+entity: camera.album_slideshow_on_this_day
+transition: fade
+duration: 1200
+show_year: true        # default false
+navigation: true       # default true
+delete_button: true    # default true; set false on shared wall panels
+language: en           # optional, defaults to your Home Assistant language (en, pl)
+```
+
+It sets Album Slideshow's `tap_pause_seconds` to 0 unless you set it yourself. Otherwise the picture freezes for 8 s after tapping it, and previous/next seems to lag. Set the slideshow's *Orientation mismatch mode* to `single` so each slide shows exactly one photo, and raise *Navigation buffer* to preload more slides for quick clicking.
 
 ## How it works
 
