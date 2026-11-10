@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http import KEY_AUTHENTICATED, HomeAssistantView
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, PHOTO_EXTS
@@ -14,12 +14,17 @@ _CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 
 class _PhotoView(HomeAssistantView):
     # Logged-in users only; signed URLs from the media source (authSig) work as well.
-    requires_auth = True
+    # The check is done here instead of with requires_auth: Home Assistant would answer
+    # 401 and record every stale signed URL (slideshows keep them across restarts) as a
+    # failed login, with a "Login attempt failed" notification each time.
+    requires_auth = False
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
 
-    async def _resolve(self, path: str) -> tuple[PhotoLibrary, str]:
+    async def _resolve(self, request: web.Request, path: str) -> tuple[PhotoLibrary, str]:
+        if not request.get(KEY_AUTHENTICATED, False):
+            raise web.HTTPForbidden
         lib: PhotoLibrary | None = self.hass.data.get(DOMAIN)
         if lib is None:
             raise web.HTTPServiceUnavailable
@@ -34,7 +39,7 @@ class ImageView(_PhotoView):
     name = "api:photoprism_library:image"
 
     async def get(self, request: web.Request, path: str) -> web.StreamResponse:
-        lib, real = await self._resolve(path)
+        lib, real = await self._resolve(request, path)
         if lib.needs_conversion(path):
             try:
                 data = await lib.async_jpeg(real, thumb=False)
@@ -49,7 +54,7 @@ class ThumbView(_PhotoView):
     name = "api:photoprism_library:thumb"
 
     async def get(self, request: web.Request, path: str) -> web.StreamResponse:
-        lib, real = await self._resolve(path)
+        lib, real = await self._resolve(request, path)
         if ext_of(path) not in PHOTO_EXTS:
             raise web.HTTPNotFound
         try:

@@ -8,7 +8,7 @@
  *   previous/next arrows on the photo, a loading spinner, the year the photo
  *   was taken and the delete button.
  */
-const VERSION = "1.2.0";
+const VERSION = "1.2.1";
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
