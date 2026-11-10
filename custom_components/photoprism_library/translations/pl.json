@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PhotoPrism Library",
+        "description": "Dodaje folder ze zdjęciami do przeglądarki multimediów. Zdjęcia HEIC są na bieżąco konwertowane do JPEG, a dwa dodatkowe foldery pokazują zdjęcia z tego dnia w poprzednich latach i losowy wybór.",
+        "data": {
+          "folder": "Folder ze zdjęciami",
+          "extra_folders": "Dodatkowe dozwolone foldery"
+        },
+        "data_description": {
+          "folder": "Folder widoczny dla Home Assistant, np. oryginały PhotoPrism zamontowane w /media/zdjecia.",
+          "extra_folders": "Opcjonalne, rozdzielone przecinkami. Potrzebne, gdy pliki w folderze są dowiązaniami do innych miejsc (udostępniane są tylko te foldery)."
+        }
+      }
+    },
+    "error": {
+      "folder_not_found": "Nie znaleziono folderu wewnątrz Home Assistant."
+    },
+    "abort": {
+      "single_instance_allowed": "Już skonfigurowane."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PhotoPrism Library",
+        "data": {
+          "random_count": "Liczba zdjęć w folderze Losowe",
+          "skip_screenshots": "Pomijaj PNG/GIF (zrzuty ekranu, animacje) w Tego dnia i Losowe"
+        }
+      }
+    }
+  }
+}
