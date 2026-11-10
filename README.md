@@ -105,7 +105,7 @@ Both HTTP endpoints require a logged-in user or a signed URL. Converted images a
 
 ## Notes
 
-- Not affiliated with PhotoPrism. This integration reads files only and never talks to the PhotoPrism API.
+- Not affiliated with PhotoPrism. Browsing only reads files. The PhotoPrism API is used only to delete photos, and only when you turn that on.
 - RAW files (DNG etc.) are listed but not converted.
 - Home Assistant signs media URLs with a key that changes on every restart. Album Slideshow keeps signed URLs, so after a restart this integration reloads the slideshows that use it. Until that happens (about a minute), Home Assistant logs a few failed image requests.
 
