@@ -10,10 +10,11 @@ Built for PhotoPrism's `originals` folder, but it works with any folder of photo
 - **Thumbnails** in the media browser grid for every photo.
 - **On this day.** Photos taken on today's date in earlier years. The date comes from `YYYY/MM/DD` folders or from names like `20230512_143000_ABCD.jpg`, `IMG_20230512_…`, `PXL_20230512…` or `2023-05-12 …`.
 - **Random.** A random selection from the whole library (500 by default), refreshed every 6 hours.
-- **Live Photos shown once.** The short video that belongs to a Live Photo is hidden.
+- **Live Photos shown once.** The short video that belongs to a Live Photo (`IMG_1234.MOV` or iCloud's `IMG_1234_HEVC.MOV`) is hidden.
 - **Screenshots left out** (PNG/GIF) of the smart folders. You can turn this off in the options.
 - **Symlink-friendly.** PhotoPrism originals are often symlinks into another folder, and you can allow those target folders. Nothing outside the folders you configure is ever served.
 - **Works with slideshow cards.** Point a media-source slideshow such as [Album Slideshow](https://github.com/eyalgal/album_slideshow) at `media-source://photoprism_library/@on_this_day` or `media-source://photoprism_library/@random`.
+- **Delete photos for good (optional).** Admins get a trash button when hovering over a photo preview in the media browser and on the slideshow card. After confirming, the photo is removed from PhotoPrism, from disk (with its Live Photo video, edits, RAW and sidecar files) and from Home Assistant.
 - **Translations:** English and Polish.
 
 ## Installation
@@ -36,7 +37,7 @@ services:
   homeassistant:
     volumes:
       - ./config:/config
-      - /srv/photoprism/originals:/media/photos:ro
+      - /srv/photoprism/originals:/media/photos:ro   # drop :ro to allow deleting photos
       # Only if your originals are symlinks into another folder (e.g. an import/source folder):
       # mount that folder at the same path the links point to.
       - /srv/photoprism/import:/photoprism/import:ro
@@ -57,6 +58,26 @@ The library appears in **Media → PhotoPrism Library**.
 |---|---|---|
 | Photos in the Random folder | 500 | 10 – 5000 |
 | Leave PNG/GIF out of On this day and Random | on | Phone screenshots are usually PNG |
+| Allow deleting photos | off | See below |
+| Also delete in PhotoPrism | no | *No* (files only), *the PhotoPrism integration's connection*, or *an app password* |
+
+## Deleting photos
+
+Deleting is off by default. To use it:
+
+1. Mount the photo folders **writable** (no `:ro`), including the extra allowed folders that links point to.
+2. Open the integration options and turn on **Allow deleting photos**. Choose how PhotoPrism is told:
+   - reuse the connection of the [PhotoPrism integration](https://github.com/ice413/hass-photoprism), if you have it set up, or
+   - an **app password** (PhotoPrism: *Settings → Account → Apps and Devices*) with the PhotoPrism URL.
+3. Reload the browser. Admins now see a trash button when hovering over a photo preview (media browser) or the `photoprism-library-slideshow` card.
+
+The button first lists every file that will be deleted and asks for confirmation. Then it:
+
+1. archives the photo in PhotoPrism and deletes it permanently. If this fails, nothing is deleted on disk.
+2. deletes the files from disk: the photo, its Live Photo video, edits (`.AAE`), RAW and sidecars with the same name. Links are deleted together with the file they point to. Folders are never deleted.
+3. removes the photo from Home Assistant and reloads slideshows that use this library.
+
+Each deletion is logged and fires a `photoprism_library_deleted` event. Deleting cannot be undone.
 
 ## Slideshow example
 
@@ -69,6 +90,8 @@ transition: fade
 duration: 1500
 ```
 
+To get the delete button on the slideshow, use `custom:photoprism-library-slideshow` with the same options. It wraps the Album Slideshow card. Set the slideshow's *Orientation mismatch mode* to `single` so each slide shows exactly one photo.
+
 ## How it works
 
 | URL | |
@@ -76,6 +99,7 @@ duration: 1500
 | `media-source://photoprism_library/<path>` | Browse folders and photos |
 | `/api/photoprism_library/image/<path>` | The photo: HEIC as JPEG (max 2560 px), anything else unchanged |
 | `/api/photoprism_library/thumb/<path>` | 360 px JPEG thumbnail |
+| WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Admin only, when deleting is enabled |
 
 Both HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two conversions run at once, so small hosts like a Raspberry Pi stay responsive.
 
@@ -83,6 +107,7 @@ Both HTTP endpoints require a logged-in user or a signed URL. Converted images a
 
 - Not affiliated with PhotoPrism. This integration reads files only and never talks to the PhotoPrism API.
 - RAW files (DNG etc.) are listed but not converted.
+- Home Assistant signs media URLs with a key that changes on every restart. Album Slideshow keeps signed URLs, so after a restart this integration reloads the slideshows that use it. Until that happens (about a minute), Home Assistant logs a few failed image requests.
 
 ## License
 

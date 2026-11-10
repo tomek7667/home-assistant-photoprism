@@ -8,6 +8,17 @@ CONF_EXTRA_FOLDERS = "extra_folders"
 CONF_RANDOM_COUNT = "random_count"
 CONF_SKIP_SCREENSHOTS = "skip_screenshots"
 
+# Deleting photos (off by default) and the PhotoPrism connection used for it.
+CONF_ALLOW_DELETE = "allow_delete"
+CONF_PHOTOPRISM = "photoprism"
+CONF_PHOTOPRISM_URL = "photoprism_url"
+CONF_PHOTOPRISM_TOKEN = "photoprism_token"
+PHOTOPRISM_NONE = "none"  # files only, PhotoPrism is not told
+PHOTOPRISM_INTEGRATION = "integration"  # reuse the PhotoPrism integration's connection
+PHOTOPRISM_APP_PASSWORD = "app_password"
+PHOTOPRISM_INTEGRATION_DOMAIN = "photoprism"
+EVENT_DELETED = "photoprism_library_deleted"
+
 DEFAULT_FOLDER = "/media"
 DEFAULT_RANDOM_COUNT = 500
 DEFAULT_SKIP_SCREENSHOTS = True

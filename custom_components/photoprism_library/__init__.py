@@ -1,22 +1,41 @@
 """PhotoPrism Library: browse your photo folder in Home Assistant, HEIC included."""
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.start import async_at_started
 
+from . import slideshow, websocket
 from .const import (
+    CONF_ALLOW_DELETE,
     CONF_EXTRA_FOLDERS,
     CONF_FOLDER,
+    CONF_PHOTOPRISM,
+    CONF_PHOTOPRISM_TOKEN,
+    CONF_PHOTOPRISM_URL,
     CONF_RANDOM_COUNT,
     CONF_SKIP_SCREENSHOTS,
     DEFAULT_RANDOM_COUNT,
     DEFAULT_SKIP_SCREENSHOTS,
     DOMAIN,
+    PHOTOPRISM_APP_PASSWORD,
+    PHOTOPRISM_INTEGRATION,
+    PHOTOPRISM_INTEGRATION_DOMAIN,
+    PHOTOPRISM_NONE,
 )
 from .library import PhotoLibrary
+from .photoprism import PhotoPrismClient
 from .views import ImageView, ThumbView
 
-_VIEWS_REGISTERED = f"{DOMAIN}_views"
+_LOGGER = logging.getLogger(__name__)
+_REGISTERED = f"{DOMAIN}_registered"
+STATIC_URL = "/photoprism_library_static"
+VERSION = "1.1.0"
 
 
 def _register_heif_opener() -> None:
@@ -37,21 +56,58 @@ def split_folders(value: str | list[str] | None) -> list[str]:
     return [v.strip() for v in value.replace("\n", ",").split(",") if v.strip()]
 
 
+def _photoprism_client(hass: HomeAssistant, options: dict) -> PhotoPrismClient | None:
+    mode = options.get(CONF_PHOTOPRISM, PHOTOPRISM_NONE)
+    if mode == PHOTOPRISM_APP_PASSWORD and options.get(CONF_PHOTOPRISM_URL) and options.get(CONF_PHOTOPRISM_TOKEN):
+        return PhotoPrismClient(hass, options[CONF_PHOTOPRISM_URL], token=options[CONF_PHOTOPRISM_TOKEN])
+    if mode == PHOTOPRISM_INTEGRATION:
+        for entry in hass.config_entries.async_entries(PHOTOPRISM_INTEGRATION_DOMAIN):
+            data = entry.data
+            if data.get("url"):
+                return PhotoPrismClient(
+                    hass,
+                    data["url"],
+                    token=data.get("token") or data.get("api_key"),
+                    username=data.get("username"),
+                    password=data.get("password"),
+                    verify_ssl=data.get("verify_ssl", True),
+                )
+        _LOGGER.warning("PhotoPrism integration not found; deleting will only remove files")
+    return None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.async_add_import_executor_job(_register_heif_opener)
     options = {**entry.data, **entry.options}
-    hass.data[DOMAIN] = PhotoLibrary(
+    lib = PhotoLibrary(
         hass,
         folder=options[CONF_FOLDER],
         extra_folders=split_folders(options.get(CONF_EXTRA_FOLDERS)),
         random_count=int(options.get(CONF_RANDOM_COUNT, DEFAULT_RANDOM_COUNT)),
         skip_screenshots=bool(options.get(CONF_SKIP_SCREENSHOTS, DEFAULT_SKIP_SCREENSHOTS)),
     )
-    if not hass.data.get(_VIEWS_REGISTERED):  # aiohttp routes can't be removed; register once
+    lib.allow_delete = bool(options.get(CONF_ALLOW_DELETE, False))
+    lib.photoprism = _photoprism_client(hass, options) if lib.allow_delete else None
+    hass.data[DOMAIN] = lib
+
+    if not hass.data.get(_REGISTERED):  # routes and commands can't be removed; register once
         hass.http.register_view(ImageView(hass))
         hass.http.register_view(ThumbView(hass))
-        hass.data[_VIEWS_REGISTERED] = True
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "www"), False)]
+        )
+        # Adds the delete button to photo previews and the slideshow card.
+        add_extra_js_url(hass, f"{STATIC_URL}/photoprism-library.js?v={VERSION}")
+        websocket.async_register(hass)
+        hass.data[_REGISTERED] = True
+
     entry.async_on_unload(entry.add_update_listener(_async_reload))
+
+    # Slideshow albums hold URLs signed before the restart, which are invalid now.
+    async def _refresh_slideshows(_hass: HomeAssistant) -> None:
+        await slideshow.async_refresh(hass)
+
+    entry.async_on_unload(async_at_started(hass, _refresh_slideshows))
     return True
 
 

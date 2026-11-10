@@ -27,8 +27,31 @@
         "title": "PhotoPrism Library",
         "data": {
           "random_count": "Photos in the Random folder",
-          "skip_screenshots": "Leave PNG/GIF (screenshots, animations) out of On this day and Random"
+          "skip_screenshots": "Leave PNG/GIF (screenshots, animations) out of On this day and Random",
+          "allow_delete": "Allow deleting photos",
+          "photoprism": "Also delete in PhotoPrism",
+          "photoprism_url": "PhotoPrism URL",
+          "photoprism_token": "PhotoPrism app password"
+        },
+        "data_description": {
+          "allow_delete": "Admins get a delete button on photo previews and on the PhotoPrism Library slideshow card. Deleting removes the photo's files from disk (Home Assistant needs write access to the photo folders) and cannot be undone.",
+          "photoprism": "Remove the photo from PhotoPrism too, before the files are deleted.",
+          "photoprism_url": "Only for the app password option, e.g. http://photoprism:2342",
+          "photoprism_token": "Only for the app password option. Create one in PhotoPrism: Settings → Account → Apps and Devices. Leave empty to keep the saved one."
         }
+      }
+    },
+    "error": {
+      "photoprism_integration_missing": "The PhotoPrism integration is not set up.",
+      "photoprism_app_password_missing": "Enter the PhotoPrism URL and an app password."
+    }
+  },
+  "selector": {
+    "photoprism": {
+      "options": {
+        "none": "No, only delete the files",
+        "integration": "Yes, using the PhotoPrism integration's connection",
+        "app_password": "Yes, with an app password"
       }
     }
   }
