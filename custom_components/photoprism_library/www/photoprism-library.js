@@ -10,7 +10,7 @@
  *   previous/next arrows on the photo, a loading spinner, the year the photo
  *   was taken and the delete button.
  */
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
@@ -85,6 +85,7 @@ const CARD_CSS = `
     transition: opacity 0.3s;
   }
   .ppl-year b { display: block; font-size: 30px; font-weight: 600; letter-spacing: 0.5px; }
+  .ppl-year b.ppl-date { font-size: 24px; }
   .ppl-year span { font-size: 13px; opacity: 0.9; }
   .ppl-year:empty { opacity: 0; }
 `;
@@ -105,11 +106,22 @@ const photoPath = (url) => {
   const match = (url || "").match(PHOTO_URL);
   return match ? decodeURIComponent(match[1]) : null;
 };
-const photoYear = (path) => {
+/** The date a photo was taken, from its YYYY/MM/DD folders or its file name. */
+const photoDate = (path) => {
   if (!path) return null;
   const slash = path.lastIndexOf("/");
   const match = `${path.slice(0, slash + 1)}`.match(PATH_DATE) || path.slice(slash + 1).match(NAME_DATE);
-  return match ? Number(match[1]) : null;
+  return match ? { year: Number(match[1]), month: match[2], day: match[3] } : null;
+};
+/**
+ * The date overlay: "date" shows DD.MM.YYYY, "year" the year and how long ago
+ * (made for On this day, where only the year differs).
+ */
+const dateOverlay = (path, format, t) => {
+  const date = photoDate(path);
+  if (!date) return "";
+  if (format === "date") return `<b class="ppl-date">${date.day}.${date.month}.${date.year}</b>`;
+  return `<b>${date.year}</b><span>${t.yearsAgo(new Date().getFullYear() - date.year)}</span>`;
 };
 const notify = (el, message) =>
   el.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
@@ -215,7 +227,7 @@ customElements.whenDefined("hui-dialog-web-browser-play-media").then(() => {
 
 /* ---- Slideshow card ------------------------------------------------------- */
 
-const OWN_KEYS = ["type", "delete_button", "navigation", "show_year", "language"];
+const OWN_KEYS = ["type", "delete_button", "navigation", "show_year", "date_format", "language"];
 
 class PhotoPrismLibrarySlideshow extends HTMLElement {
   setConfig(config) {
@@ -365,13 +377,12 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
       this._year.innerHTML = "";
       return;
     }
-    const year = photoYear(photoPath(url));
-    if (!year) {
+    const overlay = dateOverlay(photoPath(url), this._config.date_format, text(this._hass, this._config.language));
+    if (!overlay) {
       this._year.innerHTML = "";
       return;
     }
-    const ago = new Date().getFullYear() - year;
-    this._year.innerHTML = `<b>${year}</b><span>${text(this._hass, this._config.language).yearsAgo(ago)}</span>`;
+    this._year.innerHTML = overlay;
   }
 
   async _syncDelete() {
@@ -448,6 +459,8 @@ const SOURCE = "media-source://photoprism_library";
 class PhotoPrismLibraryViewer extends HTMLElement {
   setConfig(config) {
     this._config = { folder: "@random", show_year: true, delete_button: true, aspect_ratio: "16/9", autoplay: 0, ...config };
+    // Random photos are from any day, so their whole date says more than "N years ago"
+    this._config.date_format ||= this._config.folder === "@random" ? "date" : "year";
     this._items = null;
     this._index = 0;
     this._token = 0;
@@ -637,10 +650,7 @@ class PhotoPrismLibraryViewer extends HTMLElement {
   }
 
   _renderYear(path) {
-    const year = this._config.show_year ? photoYear(path) : null;
-    this._year.innerHTML = year
-      ? `<b>${year}</b><span>${this._t.yearsAgo(new Date().getFullYear() - year)}</span>`
-      : "";
+    this._year.innerHTML = this._config.show_year ? dateOverlay(path, this._config.date_format, this._t) : "";
   }
 
   async _syncDelete() {

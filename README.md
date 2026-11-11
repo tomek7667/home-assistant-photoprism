@@ -102,6 +102,7 @@ entity: camera.album_slideshow_on_this_day
 transition: fade
 duration: 1200
 show_year: true        # default false
+date_format: year      # "year" = year and how long ago (default), "date" = DD.MM.YYYY
 navigation: true       # default true
 delete_button: true    # default true; set false on shared wall panels
 language: en           # optional, defaults to your Home Assistant language (en, pl)
@@ -114,14 +115,15 @@ It sets Album Slideshow's `tap_pause_seconds` to 0 unless you set it yourself. O
 `custom:photoprism-library-viewer` browses a library folder right in the browser, without a slideshow integration. It preloads the photos around the current one, so previous/next is instant. It's the quickest way to go through photos and delete the ones you don't want:
 
 - **◀ ▶ arrows**, the **← → keys** and **Delete** while the pointer is over the card, and **swipe** on touch screens
-- a **12 / 500** counter and the **year** the photo was taken
+- a **12 / 500** counter and the **date** the photo was taken: *12.05.2023* for Random and folders, or the year and how long ago (*2020 · 6 years ago*) for On this day
 - **🔀** for a new random selection (for the `@random` folder)
 - the **delete button** (when deleting is enabled, admins only). It always acts on the photo on screen, and the next photo takes its place immediately
 
 ```yaml
 type: custom:photoprism-library-viewer
 folder: "@random"      # or "@on_this_day", or a folder such as 2023/07
-show_year: true
+show_year: true        # show when the photo was taken
+date_format: date      # "date" = DD.MM.YYYY (default for @random), "year" = year and how long ago (default otherwise)
 delete_button: true
 autoplay: 0            # seconds between photos, 0 = manual
 aspect_ratio: 16/9
