@@ -10,7 +10,7 @@
  *   previous/next arrows on the photo, a loading spinner, the year the photo
  *   was taken and the delete button.
  */
-const VERSION = "1.3.1";
+const VERSION = "1.3.2";
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
@@ -431,6 +431,10 @@ const VIEWER_CSS = `
     opacity: 0; transition: opacity 0.15s ease;
   }
   .ppl-viewer .photo.show, .ppl-viewer .bg.show { opacity: 1; }
+  /* Only the photo on screen takes clicks, so "Open image in new tab", "Copy image"
+     and "Save image as" act on it, not on the previous photo kept in the other layer */
+  .ppl-viewer .photo:not(.show), .ppl-viewer .bg { pointer-events: none; }
+  .ppl-viewer .photo.show { z-index: 1; }
   .ppl-count {
     position: absolute; z-index: 4; left: 12px; top: 12px; padding: 3px 9px; border-radius: 12px;
     color: #fff; font-size: 13px; background: rgba(0, 0, 0, 0.45); pointer-events: none;
