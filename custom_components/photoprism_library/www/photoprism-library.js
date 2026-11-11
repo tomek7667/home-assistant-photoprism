@@ -36,6 +36,7 @@ const TEXT = {
     favorite: "Add to favourites",
     unfavorite: "Remove from favourites",
     favFailed: (err) => `Could not change favourites: ${err}`,
+    similar: "Similar photos",
   },
   pl: {
     button: "Usuń trwale",
@@ -57,6 +58,7 @@ const TEXT = {
     favorite: "Dodaj do ulubionych",
     unfavorite: "Usuń z ulubionych",
     favFailed: (err) => `Nie udało się zmienić ulubionych: ${err}`,
+    similar: "Podobne zdjęcia",
   },
 };
 
@@ -147,11 +149,7 @@ const notify = (el, message) =>
   el.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
 
 let configPromise;
-const deleteAllowed = async (hass) => {
-  if (!hass?.user) return false;
-  configPromise ||= hass.callWS({ type: "photoprism_library/config" }).catch(() => ({ allow_delete: false }));
-  return (await configPromise).allow_delete;
-};
+const deleteAllowed = async (hass) => (await integrationConfig(hass)).allow_delete === true;
 
 /* ---- Favourites: one subscription per page, shared by every card ------------ */
 
@@ -228,6 +226,51 @@ function favoriteButton(hass, getPath, lang) {
 
 const toolbar = () => Object.assign(document.createElement("div"), { className: "ppl-tools" });
 
+/** The integration's settings that the cards need (fetched once per page). */
+const integrationConfig = async (hass) => {
+  if (!hass?.user) return {};
+  configPromise ||= hass.callWS({ type: "photoprism_library/config" }).catch(() => ({ allow_delete: false }));
+  return configPromise;
+};
+
+const SIMILAR_ICON =
+  '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M15.2 15.2 21 21"/>' +
+  '<path d="M5.6 10c1.2-2 2.7-3 4.4-3s3.2 1 4.4 3c-1.2 2-2.7 3-4.4 3s-3.2-1-4.4-3z" stroke-width="1.6"/>' +
+  '<circle cx="10" cy="10" r="1.3" fill="currentColor" stroke="none"/></svg>';
+
+const navigate = (url) => {
+  history.pushState(null, "", url);
+  window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+};
+
+/**
+ * The 🔍 button: opens the dashboard view set in the integration options with the
+ * photo, or resolves to null when similar photos aren't set up.
+ */
+async function similarButton(hass, getPath, lang, beforeNavigate) {
+  const config = await integrationConfig(hass);
+  if (!config.similar || !config.similar_view) return null;
+  const button = document.createElement("button");
+  button.className = "ppl-tool ppl-sim";
+  const label = text(hass, lang).similar;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = SIMILAR_ICON;
+  button.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const path = getPath();
+    if (!path) {
+      notify(button, text(currentHass() || hass, lang).noPhoto);
+      return;
+    }
+    beforeNavigate?.();
+    navigate(`${config.similar_view}?photo=${encodeURIComponent(path)}`);
+  });
+  return button;
+}
+
 async function deletePhoto(hass, path, el, lang) {
   const t = text(hass, lang);
   try {
@@ -301,6 +344,9 @@ async function decoratePreview(dialog) {
   const tools = toolbar();
   tools.appendChild(favoriteButton(dialog.hass, () => anchor.dataset.path));
   if (canDelete) tools.appendChild(deleteButton(dialog.hass, () => anchor.dataset.path, () => dialog.closeDialog?.()));
+  similarButton(dialog.hass, () => anchor.dataset.path, undefined, () => dialog.closeDialog?.()).then(
+    (btn) => btn && tools.prepend(btn),
+  );
   anchor.appendChild(tools);
   img.before(anchor);
   // :hover does not reach into the dialog's top layer, so track the pointer here.
@@ -331,7 +377,9 @@ customElements.whenDefined("hui-dialog-web-browser-play-media").then(() => {
 
 /* ---- Slideshow card ------------------------------------------------------- */
 
-const OWN_KEYS = ["type", "delete_button", "favorite_button", "navigation", "show_year", "date_format", "language"];
+const OWN_KEYS = [
+  "type", "delete_button", "favorite_button", "similar_button", "navigation", "show_year", "date_format", "language",
+];
 
 class PhotoPrismLibrarySlideshow extends HTMLElement {
   setConfig(config) {
@@ -372,6 +420,12 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
       // The photo on screen, not the one the slideshow is about to show
       this._favBtn = favoriteButton(this._hass || currentHass(), () => photoPath(this._displayedUrl()), this._config.language);
       this._tools.appendChild(this._favBtn);
+    }
+    const tools = this._tools;
+    if (this._config.similar_button !== false) {
+      similarButton(this._hass || currentHass(), () => photoPath(this._displayedUrl()), this._config.language).then(
+        (btn) => btn && tools.isConnected !== false && tools.prepend(btn),
+      );
     }
     this.shadowRoot.appendChild(host);
     this._inner = card;
@@ -624,10 +678,20 @@ class PhotoPrismLibraryViewer extends HTMLElement {
   }
 
   _addFavorite() {
-    if (!this._config.favorite_button || this._favBtn || !this._hass) return;
-    this._favBtn = favoriteButton(this._hass, () => this._shown?.path, this._config.language);
-    // Left of the delete button
-    this._tools.insertBefore(this._favBtn, this._deleteBtn || null);
+    if (!this._hass) return;
+    if (this._config.favorite_button && !this._favBtn) {
+      this._favBtn = favoriteButton(this._hass, () => this._shown?.path, this._config.language);
+      // Left of the delete button
+      this._tools.insertBefore(this._favBtn, this._deleteBtn || null);
+    }
+    if (this._config.similar_button !== false && !this._simPending) {
+      const tools = this._tools;
+      this._simPending = similarButton(
+        this._hass, () => this._shown?.path, this._config.language, () => this._config.onClose?.(),
+      ).then((btn) => {
+        if (btn && tools === this._tools) tools.insertBefore(btn, this._favBtn || this._deleteBtn || null);
+      });
+    }
   }
 
   get _t() {
@@ -659,6 +723,7 @@ class PhotoPrismLibraryViewer extends HTMLElement {
     this._deleteBtn = null;
     this._favBtn?.dispose();
     this._favBtn = null;
+    this._simPending = null;
     this._tools = toolbar();
     host.append(this._tools);
     host.append(this._button("ppl-nav prev", PREV_ICON, this._t.previous, () => this._step(-1)));
@@ -777,7 +842,7 @@ class PhotoPrismLibraryViewer extends HTMLElement {
 
   /** Resolve (signed URL) and decode a photo once; later calls reuse the promise. */
   _preload(item) {
-    if (item.ready && Date.now() - item.readyAt > 5 * 3600 * 1000) item.ready = null; // signed URL ages out
+    if (item.ready && Date.now() - item.readyAt > 5 * 3600 * 1000) item.ready = item.url = null; // signed URL ages out
     if (!item.ready) item.readyAt = Date.now();
     item.ready ||= this._hass
       .callWS({ type: "media_source/resolve_media", media_content_id: item.id, expires: 6 * 3600 })
@@ -787,7 +852,10 @@ class PhotoPrismLibraryViewer extends HTMLElement {
           : new Promise((resolve, reject) => {
             const img = new Image();
             img.decoding = "async";
-            img.onload = () => resolve(res.url);
+            img.onload = () => {
+              item.url = res.url;
+              resolve(res.url);
+            };
             img.onerror = () => reject(new Error("load failed"));
             img.src = res.url;
           }),
@@ -811,6 +879,9 @@ class PhotoPrismLibraryViewer extends HTMLElement {
     const item = items[index];
     const token = ++this._token;
     this._host.classList.add("ppl-loading");
+    // A thumbnail from the grid shows at once; the full photo replaces it when loaded
+    const placeholder = item.thumb && item.kind !== "video" && !item.url;
+    if (placeholder) this._display(item, item.thumb, index);
     let url;
     try {
       url = await this._preload(item);
@@ -823,7 +894,20 @@ class PhotoPrismLibraryViewer extends HTMLElement {
       return;
     }
     if (token !== this._token) return; // a newer click won
-    this._host.classList.remove("is-empty", "ppl-loading");
+    this._host.classList.remove("ppl-loading");
+    if (placeholder) {
+      // Same layer, sharper picture: no second fade
+      this._layers[this._front].src = url;
+      this._bg.src = url;
+    } else {
+      this._display(item, url, index);
+    }
+    for (const k of [1, 2, 3, 4, 5, -1]) this._preload(items[(index + k + items.length) % items.length]).catch(() => {});
+  }
+
+  /** Put a photo (or video) on screen; from now on the buttons act on it. */
+  _display(item, url, index) {
+    this._host.classList.remove("is-empty");
     if (item.kind === "video") {
       this._layers.forEach((l) => l.classList.remove("show"));
       this._bg.classList.remove("show");
@@ -840,11 +924,10 @@ class PhotoPrismLibraryViewer extends HTMLElement {
       this._bg.src = url;
       this._bg.classList.add("show");
     }
-    this._shown = item; // what the delete and heart buttons act on
+    this._shown = item; // what the delete, heart and similar buttons act on
     this._favBtn?.refresh();
-    this._count.textContent = `${index + 1} / ${items.length}`;
+    this._count.textContent = `${index + 1} / ${this._items.length}`;
     this._renderYear(item.path);
-    for (const k of [1, 2, 3, 4, 5, -1]) this._preload(items[(index + k + items.length) % items.length]).catch(() => {});
   }
 
   _renderYear(path) {
@@ -972,7 +1055,8 @@ Object.assign(TEXT.pl, {
 });
 
 const GRID_CSS = `
-  ha-card { overflow: hidden; }
+  /* No overflow: hidden here, it would keep the slider and the action bar from sticking */
+  ha-card { overflow: visible; }
   .head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
   .head .title { flex: 1; min-width: 120px; font-size: 20px; font-weight: 500; color: var(--primary-text-color); }
   .head .title small { font-size: 14px; font-weight: 400; color: var(--secondary-text-color); margin-left: 6px; }
@@ -1014,24 +1098,90 @@ const GRID_CSS = `
   .actions .count { flex: 1; color: var(--primary-text-color); }
 `;
 
+Object.assign(TEXT.en, {
+  similarTitle: "Similar photos",
+  sortScore: "Most similar",
+  similarity: "Similarity",
+  loose: "loosely related",
+  near: "near-duplicates",
+  found: (n) => `${n} found`,
+  shownOf: (shown, n) => `showing ${shown} of ${n}`,
+  pickPhoto: "Open a photo and tap 🔍 to see photos like it.",
+  noSimilar: "Nothing this similar. Move the slider to the left to see more.",
+  searching: "Looking for similar photos…",
+  similarFailed: (err) => `Could not search: ${err}`,
+});
+Object.assign(TEXT.pl, {
+  similarTitle: "Podobne zdjęcia",
+  sortScore: "Najbardziej podobne",
+  similarity: "Podobieństwo",
+  loose: "luźno powiązane",
+  near: "prawie identyczne",
+  found: (n) => `znaleziono: ${n}`,
+  shownOf: (shown, n) => `pokazano ${shown} z ${n}`,
+  pickPhoto: "Otwórz zdjęcie i dotknij 🔍, żeby zobaczyć podobne.",
+  noSimilar: "Nic tak podobnego. Przesuń suwak w lewo, żeby zobaczyć więcej.",
+  searching: "Szukam podobnych zdjęć…",
+  similarFailed: (err) => `Nie udało się wyszukać: ${err}`,
+});
+
+const SIMILAR_CSS = `
+  .source { display: flex; gap: 16px; align-items: center; padding: 0 16px 12px; }
+  .source img {
+    height: 180px; max-width: 50%; object-fit: contain; border-radius: 8px; cursor: pointer;
+    background: rgba(127, 127, 127, 0.15);
+  }
+  .source .meta { color: var(--secondary-text-color); font-size: 14px; line-height: 1.5; word-break: break-all; }
+  .source .meta b { display: block; font-size: 22px; color: var(--primary-text-color); word-break: normal; }
+  .tile .score {
+    position: absolute; left: 6px; top: 6px; padding: 1px 6px; border-radius: 10px; font-size: 12px;
+    color: #fff; background: rgba(0, 0, 0, 0.55); pointer-events: none;
+  }
+  .slider {
+    position: sticky; bottom: 0; z-index: 2; padding: 10px 16px 12px;
+    background: var(--card-background-color); border-top: 1px solid var(--divider-color);
+  }
+  .slider .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--primary-text-color); }
+  .slider .row b { font-size: 16px; }
+  .slider .hints { display: flex; justify-content: space-between; font-size: 12px; color: var(--secondary-text-color); }
+  .slider input { width: 100%; margin: 8px 0 2px; accent-color: var(--primary-color); }
+  .selecting .slider { display: none; }
+`;
+
 const SORTS = ["added", "newest", "oldest", "year"];
 const dateKey = (path) => {
   const d = photoDate(path);
   return d ? `${d.year}${d.month}${d.day}` : null;
 };
+const queryPhoto = () => new URLSearchParams(window.location.search).get("photo") || "";
 
 /**
- * `custom:photoprism-library-grid`: favourites as a grid. Tap a photo for the
- * full-screen viewer; "Select" (or a long press) picks several to delete or unheart.
+ * `custom:photoprism-library-grid`: a grid of photos with a full-screen viewer and a
+ * select mode (delete, heart/unheart several at once).
+ *   source: favorites  the favourites (newest hearts first)
+ *   source: similar    photos like the one in the page URL (?photo=...), with a slider
+ *                      for how similar they must be
  */
 class PhotoPrismLibraryGrid extends HTMLElement {
   setConfig(config) {
-    this._config = { source: "favorites", tile_size: 140, ...config };
+    this._config = {
+      source: "favorites", tile_size: 140, min_similarity: 65, max_similarity: 100, similarity: 80, limit: 300,
+      ...config,
+    };
+    this._similar = this._config.source === "similar";
     this._selected = new Set();
     this._selecting = false;
     this._urls = new Map(); // path -> signed thumbnail URL
     this._signedAt = 0;
-    this._sort = SORTS.includes(localStorage.getItem(this._sortKey)) ? localStorage.getItem(this._sortKey) : "added";
+    this._results = []; // similar: [{path, score}]
+    this._total = 0;
+    this._photo = null;
+    this._status = null; // similar: message instead of results
+    const sort = localStorage.getItem(this._sortKey);
+    this._sort = SORTS.includes(sort) ? sort : "added";
+    const saved = Number(localStorage.getItem("ppl-similarity"));
+    this._threshold = saved >= this._config.min_similarity && saved <= this._config.max_similarity
+      ? saved : Number(this._config.similarity);
     this._built = false;
     if (this._hass) this._build();
   }
@@ -1051,28 +1201,41 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   }
 
   connectedCallback() {
-    this._onFavorites ||= () => this._refresh();
+    this._onFavorites ||= () => (this._similar ? this._syncSelection() : this._refresh());
+    this._onLocation ||= () => {
+      if (this._similar && this._built && queryPhoto() !== this._photo) this._refresh();
+    };
     window.addEventListener(FAVORITES_EVENT, this._onFavorites);
+    window.addEventListener("location-changed", this._onLocation);
+    window.addEventListener("popstate", this._onLocation);
     if (this._built) this._refresh();
   }
 
   disconnectedCallback() {
     window.removeEventListener(FAVORITES_EVENT, this._onFavorites);
+    window.removeEventListener("location-changed", this._onLocation);
+    window.removeEventListener("popstate", this._onLocation);
   }
 
   _build() {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     const t = this._t;
-    this.shadowRoot.innerHTML = `<style>${GRID_CSS}</style>
+    const sortLabel = (s) => (s === "added" && this._similar ? t.sortScore : t[`sort${s[0].toUpperCase()}${s.slice(1)}`]);
+    const { min_similarity: lo, max_similarity: hi } = this._config;
+    this.shadowRoot.innerHTML = `<style>${GRID_CSS}${SIMILAR_CSS}</style>
       <ha-card style="--ppl-tile:${Number(this._config.tile_size) || 140}px">
         <div class="head">
           <div class="title"></div>
-          <select aria-label="sort">${SORTS.map(
-            (s) => `<option value="${s}">${t[`sort${s[0].toUpperCase()}${s.slice(1)}`]}</option>`,
-          ).join("")}</select>
+          <select aria-label="sort">${SORTS.map((s) => `<option value="${s}">${sortLabel(s)}</option>`).join("")}</select>
           <button class="btn select-toggle">${t.select}</button>
         </div>
+        ${this._similar ? '<div class="source"></div>' : ""}
         <div class="body"></div>
+        ${this._similar ? `<div class="slider">
+          <div class="row"><span>${t.similarity} ≥ <b class="value"></b></span><span class="found"></span></div>
+          <input type="range" min="${lo}" max="${hi}" step="1" aria-label="${t.similarity}">
+          <div class="hints"><span>${t.loose}</span><span>${t.near}</span></div>
+        </div>` : ""}
         <div class="actions">
           <span class="count"></span>
           <button class="btn all">${t.selectAll}</button>
@@ -1104,15 +1267,40 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     this._heartBtn.addEventListener("click", () => this._heartSelection());
     this._deleteBtn = root.querySelector(".delete");
     this._deleteBtn.addEventListener("click", () => this._deleteSelection());
+    if (this._similar) {
+      this._sourceEl = root.querySelector(".source");
+      this._range = root.querySelector(".slider input");
+      this._value = root.querySelector(".slider .value");
+      this._found = root.querySelector(".slider .found");
+      this._range.value = String(this._threshold);
+      this._value.textContent = `${this._threshold}%`;
+      let timer;
+      this._range.addEventListener("input", () => {
+        this._threshold = Number(this._range.value);
+        this._value.textContent = `${this._threshold}%`;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          localStorage.setItem("ppl-similarity", String(this._threshold));
+          this._search();
+        }, 250);
+      });
+    }
     this._built = true;
     favorites.ensure(this._hass);
     deleteAllowed(this._hass).then((ok) => (this._deleteBtn.hidden = !ok));
     this._refresh();
   }
 
-  /** The items of the grid, in the chosen order (newest hearts first is the stored order). */
+  /** The grid's items before sorting: favourites by recency, similar ones by score. */
+  _baseItems() {
+    if (this._similar) {
+      return this._results.map((r, i) => ({ ...mediaItem(r.path), score: r.score, added: -i, date: dateKey(r.path) }));
+    }
+    return favorites.items.map((i) => ({ ...mediaItem(i.path), added: i.added, date: dateKey(i.path) }));
+  }
+
   _ordered() {
-    const items = favorites.items.map((i) => ({ ...mediaItem(i.path), added: i.added, date: dateKey(i.path) }));
+    const items = this._baseItems();
     if (this._sort === "added") return items;
     const dir = this._sort === "oldest" ? 1 : -1;
     return items.sort((a, b) => {
@@ -1123,15 +1311,80 @@ class PhotoPrismLibraryGrid extends HTMLElement {
 
   async _refresh() {
     if (!this._built) return;
+    if (this._similar) {
+      await this._search();
+      return;
+    }
     if (!favorites.loaded) {
       this._body.innerHTML = `<div class="empty">${this._t.loading}</div>`;
       return;
     }
-    const paths = favorites.items.map((i) => i.path);
     // Drop selections of photos that are gone
     this._selected = new Set([...this._selected].filter((p) => favorites.has(p)));
-    await this._sign(paths);
+    await this._sign(favorites.items.map((i) => i.path));
     this._render();
+  }
+
+  /** Similar: (re)load the results for the photo in the URL at the current threshold. */
+  async _search() {
+    const photo = queryPhoto();
+    const token = (this._searchToken = (this._searchToken || 0) + 1);
+    if (photo !== this._photo) {
+      this._photo = photo;
+      this._selected.clear();
+      this._results = [];
+      this._renderSource();
+    }
+    if (!photo) {
+      this._status = this._t.pickPhoto;
+      this._render();
+      return;
+    }
+    if (!this._results.length) {
+      this._status = this._t.searching;
+      this._render();
+    }
+    try {
+      const res = await this._hass.callWS({
+        type: "photoprism_library/similar", path: photo, min: this._threshold / 100,
+        limit: Number(this._config.limit) || 300,
+      });
+      if (token !== this._searchToken) return; // a newer search won
+      this._results = res.results;
+      this._total = res.total;
+      this._status = res.results.length ? null : this._t.noSimilar;
+      const keep = new Set(res.results.map((r) => r.path));
+      this._selected = new Set([...this._selected].filter((p) => keep.has(p)));
+      await this._sign(res.results.map((r) => r.path));
+    } catch (err) {
+      if (token !== this._searchToken) return;
+      this._results = [];
+      this._total = 0;
+      this._status = this._t.similarFailed(err?.message || err?.code || err);
+    }
+    this._render();
+  }
+
+  async _renderSource() {
+    if (!this._sourceEl) return;
+    const photo = this._photo;
+    if (!photo) {
+      this._sourceEl.innerHTML = "";
+      return;
+    }
+    const date = photoDate(photo);
+    const name = photo.split("/").pop();
+    this._sourceEl.innerHTML = `<img alt=""><div class="meta">${date ? `<b>${date.day}.${date.month}.${date.year}</b>` : ""}${name}</div>`;
+    const img = this._sourceEl.querySelector("img");
+    img.addEventListener("click", () =>
+      openLightbox(this._hass, [{ ...mediaItem(photo), thumb: img.src || undefined }], 0, this._config.language),
+    );
+    try {
+      const res = await this._hass.callWS({ type: "photoprism_library/sign", paths: [photo] });
+      if (photo === this._photo) img.src = res.urls[photo];
+    } catch {
+      // the name and date still show
+    }
   }
 
   /** Signed thumbnail URLs, fetched for many photos at once and renewed before they expire. */
@@ -1140,9 +1393,11 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     const missing = paths.filter((p) => !this._urls.has(p));
     if (!missing.length) return;
     try {
-      const res = await this._hass.callWS({ type: "photoprism_library/sign", paths: missing });
-      if (!this._urls.size) this._signedAt = Date.now();
-      for (const [path, url] of Object.entries(res.urls)) this._urls.set(path, url);
+      for (let i = 0; i < missing.length; i += 1000) {
+        const res = await this._hass.callWS({ type: "photoprism_library/sign", paths: missing.slice(i, i + 1000) });
+        if (!this._urls.size) this._signedAt = Date.now();
+        for (const [path, url] of Object.entries(res.urls)) this._urls.set(path, url);
+      }
     } catch (err) {
       notify(this, `${this._t.loadFailed}: ${err?.message || err}`);
     }
@@ -1151,10 +1406,15 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   _render() {
     const t = this._t;
     const items = this._ordered();
-    this._title.innerHTML = `${this._config.title || t.favorites}<small>${items.length || ""}</small>`;
+    const title = this._config.title || (this._similar ? t.similarTitle : t.favorites);
+    this._title.innerHTML = `${title}<small>${items.length || ""}</small>`;
     this._card.classList.toggle("selecting", this._selecting);
+    if (this._similar && this._found) {
+      this._found.textContent = this._results.length < this._total
+        ? t.shownOf(this._results.length, this._total) : this._total ? t.found(this._total) : "";
+    }
     if (!items.length) {
-      this._body.innerHTML = `<div class="empty">${t.noFavorites}</div>`;
+      this._body.innerHTML = `<div class="empty">${this._status || t.noFavorites}</div>`;
       this._setSelecting(false);
       return;
     }
@@ -1184,7 +1444,10 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     const tile = document.createElement("div");
     tile.className = "tile";
     tile.dataset.path = item.path;
-    tile.innerHTML = `<img loading="lazy" alt="">${item.kind === "video" ? `<span class="play">${PLAY_ICON}</span>` : ""}<span class="check">${CHECK_ICON}</span>`;
+    tile.innerHTML =
+      `<img loading="lazy" alt="">${item.kind === "video" ? `<span class="play">${PLAY_ICON}</span>` : ""}` +
+      `${item.score != null ? `<span class="score">${Math.round(item.score * 100)}%</span>` : ""}` +
+      `<span class="check">${CHECK_ICON}</span>`;
     const url = this._urls.get(item.path);
     if (url) tile.querySelector("img").src = url;
     // A long press starts selecting, without opening the photo
@@ -1208,9 +1471,22 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     tile.addEventListener("click", () => {
       if (longPressed) return;
       if (this._selecting) this._toggle(item.path);
-      else openLightbox(this._hass, items.map(({ id, path, kind }) => ({ id, path, kind })), index, this._config.language);
+      else {
+        openLightbox(
+          this._hass, items.map(({ id, path, kind }) => ({ id, path, kind, thumb: this._urls.get(path) })), index,
+          this._config.language, (gone) => this._forget(gone),
+        );
+      }
     });
     return tile;
+  }
+
+  /** A photo was deleted in the full-screen viewer. */
+  _forget(path) {
+    if (!this._similar) return; // favourites update by themselves
+    this._results = this._results.filter((r) => r.path !== path);
+    this._total = Math.max(0, this._total - 1);
+    this._render();
   }
 
   _setSelecting(on) {
@@ -1262,17 +1538,23 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       const files = plans.flatMap((p) => p.files);
       const shown = files.slice(0, 15).join("\n") + (files.length > 15 ? `\n${t.more(files.length - 15)}` : "");
       if (!window.confirm(t.confirmMany(paths.length, shown, plans.some((p) => p.photoprism)))) return;
-      let ok = 0;
+      const deleted = [];
       for (const path of paths) {
         try {
           await this._hass.callWS({ type: "photoprism_library/delete", path });
-          ok += 1;
+          deleted.push(path);
         } catch {
           // counted below
         }
       }
-      notify(this, ok === paths.length ? t.deletedMany(ok) : t.deletedSome(ok, paths.length - ok));
+      notify(this, deleted.length === paths.length ? t.deletedMany(deleted.length) : t.deletedSome(deleted.length, paths.length - deleted.length));
       this._setSelecting(false);
+      if (this._similar && deleted.length) {
+        const gone = new Set(deleted);
+        this._results = this._results.filter((r) => !gone.has(r.path));
+        this._total = Math.max(0, this._total - deleted.length);
+        this._render();
+      }
     } catch (err) {
       notify(this, t.failed(err?.message || err?.code || err));
     } finally {
@@ -1298,8 +1580,8 @@ if (!customElements.get("photoprism-library-grid")) {
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "photoprism-library-grid",
-    name: "PhotoPrism Library favourites",
-    description: "Favourite photos as a grid: sorting, full-screen viewer, select several to delete or unheart.",
+    name: "PhotoPrism Library grid",
+    description: "Favourites or similar photos as a grid: sorting, full-screen viewer, select several to delete or (un)heart.",
     preview: false,
   });
 }

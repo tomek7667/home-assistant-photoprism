@@ -31,13 +31,19 @@
           "allow_delete": "Pozwól usuwać zdjęcia",
           "photoprism": "Usuwaj też w PhotoPrism",
           "photoprism_url": "Adres PhotoPrism",
-          "photoprism_token": "Hasło aplikacji PhotoPrism"
+          "photoprism_token": "Hasło aplikacji PhotoPrism",
+          "similarity_url": "Adres usługi podobnych zdjęć",
+          "similarity_token": "Token usługi podobnych zdjęć",
+          "similar_view": "Widok dashboardu z podobnymi zdjęciami"
         },
         "data_description": {
-          "allow_delete": "Administratorzy dostają przycisk usuwania na podglądzie zdjęcia i na karcie pokazu slajdów PhotoPrism Library. Usuwanie kasuje pliki zdjęcia z dysku (Home Assistant potrzebuje prawa zapisu do folderów ze zdjęciami) i nie da się go cofnąć.",
+          "allow_delete": "Każdy zalogowany użytkownik dostaje przycisk usuwania na podglądzie zdjęcia, w przeglądarce, siatce i karcie pokazu slajdów. Usunięcie kasuje pliki zdjęcia z dysku (Home Assistant potrzebuje zapisu do folderów ze zdjęciami) i nie da się go cofnąć.",
           "photoprism": "Usuń zdjęcie także z PhotoPrism, zanim zostaną skasowane pliki.",
           "photoprism_url": "Tylko dla opcji z hasłem aplikacji, np. http://photoprism:2342",
-          "photoprism_token": "Tylko dla opcji z hasłem aplikacji. Utworzysz je w PhotoPrism: Ustawienia → Konto → Aplikacje i urządzenia. Zostaw puste, aby zachować zapisane."
+          "photoprism_token": "Tylko dla opcji z hasłem aplikacji. Utworzysz je w PhotoPrism: Ustawienia → Konto → Aplikacje i urządzenia. Zostaw puste, aby zachować zapisane.",
+          "similarity_url": "Opcjonalnie. Usługa z katalogu similarity tego repozytorium, np. http://127.0.0.1:8765. Puste wyłącza przycisk podobnych zdjęć.",
+          "similarity_token": "Tylko jeśli usługa ma ustawiony TOKEN. Zostaw puste, żeby zachować zapisany.",
+          "similar_view": "Ścieżka widoku z kartą photoprism-library-grid (source: similar), np. /zdjecia/podobne. Przycisk 🔍 otwiera go z danym zdjęciem."
         }
       }
     },
@@ -52,6 +58,13 @@
         "none": "Nie, usuwaj tylko pliki",
         "integration": "Tak, przez połączenie integracji PhotoPrism",
         "app_password": "Tak, hasłem aplikacji"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "similarity_index": {
+        "name": "Przeanalizowane zdjęcia (podobne)"
       }
     }
   }

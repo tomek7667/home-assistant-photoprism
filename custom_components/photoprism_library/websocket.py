@@ -21,6 +21,7 @@ from .const import DOMAIN, EVENT_DELETED, IMAGE_URL, THUMB_URL
 from .favorites import async_get_favorites
 from .library import DeletePlan, PhotoLibrary
 from .photoprism import PhotoPrismError
+from .similarity import SimilarityError
 
 # Signed URLs handed to the cards; they are re-signed before this runs out
 _SIGN_FOR = timedelta(hours=6)
@@ -36,6 +37,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_favorites_subscribe)
     websocket_api.async_register_command(hass, ws_favorites_set)
     websocket_api.async_register_command(hass, ws_sign)
+    websocket_api.async_register_command(hass, ws_similar)
 
 
 def _library(hass: HomeAssistant, connection, msg) -> PhotoLibrary | None:
@@ -63,6 +65,8 @@ async def ws_config(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
         {
             "allow_delete": bool(lib and lib.allow_delete),
             "photoprism": bool(lib and lib.photoprism),
+            "similar": bool(lib and lib.similarity),
+            "similar_view": (lib.similar_view if lib and lib.similarity else ""),
         },
     )
 
@@ -169,3 +173,26 @@ def ws_sign(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
         for path in msg["paths"]
     }
     connection.send_result(msg["id"], {"urls": urls, "expires_in": int(_SIGN_FOR.total_seconds())})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "photoprism_library/similar",
+        vol.Required("path"): str,
+        vol.Optional("min", default=0.8): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+        vol.Optional("limit", default=300): vol.All(int, vol.Range(min=1, max=2000)),
+    }
+)
+@websocket_api.async_response
+async def ws_similar(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Photos that look like this one, most similar first, with their similarity (0-1)."""
+    lib: PhotoLibrary | None = hass.data.get(DOMAIN)
+    if lib is None or lib.similarity is None:
+        connection.send_error(msg["id"], "not_configured", "The similar-photo service is not set up in the options")
+        return
+    try:
+        data = await lib.similarity.async_similar(lib, msg["path"].strip("/"), msg["min"], msg["limit"])
+    except SimilarityError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
+    connection.send_result(msg["id"], {"results": data["results"], "total": data.get("total", len(data["results"]))})

@@ -7,6 +7,7 @@ from pathlib import Path
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.start import async_at_started
 
@@ -19,6 +20,9 @@ from .const import (
     CONF_PHOTOPRISM_TOKEN,
     CONF_PHOTOPRISM_URL,
     CONF_RANDOM_COUNT,
+    CONF_SIMILAR_VIEW,
+    CONF_SIMILARITY_TOKEN,
+    CONF_SIMILARITY_URL,
     CONF_SKIP_SCREENSHOTS,
     DEFAULT_RANDOM_COUNT,
     DEFAULT_SKIP_SCREENSHOTS,
@@ -31,10 +35,12 @@ from .const import (
 from .favorites import async_get_favorites
 from .library import PhotoLibrary
 from .photoprism import PhotoPrismClient
+from .similarity import SimilarityClient
 from .views import ImageView, ThumbView
 
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
+PLATFORMS = [Platform.SENSOR]
 STATIC_URL = "/photoprism_library_static"
 VERSION = "1.4.0"
 
@@ -89,6 +95,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     lib.allow_delete = bool(options.get(CONF_ALLOW_DELETE, False))
     lib.photoprism = _photoprism_client(hass, options) if lib.allow_delete else None
+    url = (options.get(CONF_SIMILARITY_URL) or "").strip()
+    lib.similarity = SimilarityClient(hass, url, options.get(CONF_SIMILARITY_TOKEN)) if url else None
+    lib.similar_view = (options.get(CONF_SIMILAR_VIEW) or "").strip()
     hass.data[DOMAIN] = lib
     await async_get_favorites(hass)
 
@@ -113,6 +122,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await slideshow.async_refresh(hass)
 
     entry.async_on_unload(async_at_started(hass, _refresh_slideshows))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
@@ -121,5 +131,7 @@ async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     hass.data.pop(DOMAIN, None)
     return True

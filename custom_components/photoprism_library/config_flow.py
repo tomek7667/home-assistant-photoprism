@@ -18,6 +18,9 @@ from .const import (
     CONF_PHOTOPRISM_TOKEN,
     CONF_PHOTOPRISM_URL,
     CONF_RANDOM_COUNT,
+    CONF_SIMILAR_VIEW,
+    CONF_SIMILARITY_TOKEN,
+    CONF_SIMILARITY_URL,
     CONF_SKIP_SCREENSHOTS,
     DEFAULT_FOLDER,
     DEFAULT_RANDOM_COUNT,
@@ -91,6 +94,8 @@ class PhotoPrismLibraryOptionsFlow(OptionsFlow):
             if not errors:
                 if not user_input.get(CONF_PHOTOPRISM_TOKEN) and current.get(CONF_PHOTOPRISM_TOKEN):
                     user_input[CONF_PHOTOPRISM_TOKEN] = current[CONF_PHOTOPRISM_TOKEN]  # keep the saved one
+                if not user_input.get(CONF_SIMILARITY_TOKEN) and current.get(CONF_SIMILARITY_TOKEN):
+                    user_input[CONF_SIMILARITY_TOKEN] = current[CONF_SIMILARITY_TOKEN]
                 return self.async_create_entry(data=user_input)
             current = {**current, **user_input}
         return self.async_show_form(
@@ -124,6 +129,15 @@ class PhotoPrismLibraryOptionsFlow(OptionsFlow):
                     vol.Optional(CONF_PHOTOPRISM_TOKEN): selector.TextSelector(
                         selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
                     ),
+                    vol.Optional(
+                        CONF_SIMILARITY_URL, description={"suggested_value": current.get(CONF_SIMILARITY_URL, "")}
+                    ): str,
+                    vol.Optional(CONF_SIMILARITY_TOKEN): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                    ),
+                    vol.Optional(
+                        CONF_SIMILAR_VIEW, description={"suggested_value": current.get(CONF_SIMILAR_VIEW, "")}
+                    ): str,
                 }
             ),
             errors=errors,

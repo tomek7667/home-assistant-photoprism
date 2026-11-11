@@ -1,0 +1,19 @@
+# Example: the service next to Home Assistant on the same host.
+# Mount the library at the same paths as in the Home Assistant container, read-only.
+services:
+  ppl-similarity:
+    build: .
+    container_name: ppl-similarity
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"   # Home Assistant (host network) reaches it on 127.0.0.1
+    environment:
+      ROOT: /media/zdjecia
+      DB: /data/index.db
+      HOST: 0.0.0.0
+      THREADS: "2"            # CPU threads for the model; indexing runs at low priority
+      SCAN_MINUTES: "10"      # how often to look for new photos
+    volumes:
+      - ./data:/data
+      - /srv/photos:/media/zdjecia:ro
+      # - /srv/photos-source:/photoprism/source:ro   # if the library links into another folder

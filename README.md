@@ -15,6 +15,7 @@ Built for PhotoPrism's `originals` folder, but it works with any folder of photo
 - **Symlink-friendly.** PhotoPrism originals are often symlinks into another folder, and you can allow those target folders. Nothing outside the folders you configure is ever served.
 - **Works with slideshow cards.** Point a media-source slideshow such as [Album Slideshow](https://github.com/eyalgal/album_slideshow) at `media-source://photoprism_library/@on_this_day` or `media-source://photoprism_library/@random`.
 - **Favourites ♥.** Every photo (viewer, slideshows, media browser preview) has a heart. Favourites are kept in Home Assistant, one list for everyone, and shown in the `photoprism-library-grid` card or played from the `@favorites` folder.
+- **Similar photos 🔍 (optional).** A button next to the heart opens photos that look like this one, from near-duplicates to the same kind of scene, with a slider for how similar. Uses an AI image model (SigLIP 2) in a small sidecar service; videos are compared by a frame.
 - **Delete photos for good (optional).** A trash button next to the heart. After confirming, the photo is removed from PhotoPrism, from disk (with its Live Photo video, edits, RAW and sidecar files) and from Home Assistant.
 - **Translations:** English and Polish.
 
@@ -150,6 +151,32 @@ language: en           # optional
 
 Favourites are stored in `.storage/photoprism_library.favorites` as library paths. A deleted photo is removed from them automatically.
 
+## Similar photos
+
+The 🔍 button needs the similar-photo service from the [`similarity`](similarity/) folder, a small container that gives every photo and video (one frame) an image embedding with [SigLIP 2](https://huggingface.co/timm/ViT-B-16-SigLIP2) and answers "which photos look like this one" in milliseconds.
+
+1. Run the service next to Home Assistant, with the photo folders mounted read-only at the same paths as in Home Assistant (see [`similarity/docker-compose.yml`](similarity/docker-compose.yml)):
+   ```sh
+   cd similarity && docker compose up -d --build
+   ```
+   It indexes the whole library at low priority (about 1–2 s per photo on a Raspberry Pi 5), then checks for new photos every 10 minutes. A photo that isn't analysed yet is analysed first when you press 🔍 on it.
+2. Optional, much faster: index the library once on a computer with an NVIDIA GPU (tens of photos per second) and copy the database to the service's `data` folder before starting it:
+   ```sh
+   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+   pip install -r similarity/requirements.txt
+   python similarity/ppl_similarity.py index --root /path/to/photos --db index.db --device cuda
+   ```
+   Use `--map /path/in/container=/path/here` when the library contains absolute symlinks.
+3. In the integration options set **Similar-photo service URL** (e.g. `http://127.0.0.1:8765`) and **Dashboard view for similar photos**, the path of a view with this card (a `subview` works well, its back arrow returns to where you came from):
+   ```yaml
+   type: custom:photoprism-library-grid
+   source: similar
+   similarity: 80        # default threshold in %; the slider goes from min_similarity (65) to max_similarity (100)
+   limit: 300            # most results shown
+   ```
+
+The view shows the photo on top, the results most similar first with their similarity, and a slider under them: to the right only near-duplicates (bursts, edited copies), in the middle photos of the same scene, to the left loosely related ones. Select mode works here too, handy for cleaning up bursts. A sensor shows how much of the library has been analysed.
+
 ## How it works
 
 | URL | |
@@ -160,6 +187,7 @@ Favourites are stored in `.storage/photoprism_library.favorites` as library path
 | `media-source://photoprism_library/@favorites` | The favourites, most recently added first |
 | WebSocket `photoprism_library/favorites/subscribe`, `…/favorites/set` | Read and change the favourites |
 | WebSocket `photoprism_library/sign` | Signed thumbnail URLs for many photos at once |
+| WebSocket `photoprism_library/similar` | Similar photos (via the similar-photo service) |
 | WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Any logged-in user, when deleting is enabled |
 
 Both HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two conversions run at once, so small hosts like a Raspberry Pi stay responsive.

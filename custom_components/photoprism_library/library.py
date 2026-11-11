@@ -97,7 +97,9 @@ class PhotoLibrary:
         self.skip_screenshots = skip_screenshots
         self.allow_delete = False
         self.photoprism = None  # PhotoPrismClient when deleting should also remove the photo there
-        self._thumbs: _LRU = _LRU(1500)
+        self.similarity = None  # SimilarityClient when the similar-photo service is configured
+        self.similar_view = ""  # dashboard view that shows similar photos (?photo=<path>)
+        self._thumbs: _LRU = _LRU(4000)  # ~20 kB each
         self._fulls: _LRU = _LRU(20)
         self._decode = asyncio.Semaphore(2)  # keep small hosts responsive while converting
         self._index: list[Photo] = []
@@ -243,8 +245,35 @@ class PhotoLibrary:
                 cache.pop(key, None)
 
     @staticmethod
+    def _embedded_thumbnail(path: str, max_side: int) -> Image.Image | None:
+        """The preview stored inside a HEIC (320 px on iPhones), if big enough.
+
+        Reading it takes ~20 ms on a Raspberry Pi; decoding the whole photo takes ~1 s.
+        """
+        import pillow_heif  # noqa: PLC0415 - registered at setup
+
+        heif = pillow_heif.open_heif(path, convert_hdr_to_8bit=True)
+        primary = heif[heif.primary_index]
+        if not primary.info.get("thumbnails"):
+            return None
+        thumb = primary.get_thumbnail(0)
+        if max(thumb.size) < max_side * 0.8:
+            return None
+        return thumb.to_pillow()
+
+    @staticmethod
     def render_jpeg(path: str, max_side: int, quality: int) -> bytes:
         """Decode a photo (HEIC through pillow-heif) to an upright, downscaled JPEG."""
+        if max_side <= 512 and ext_of(path) in CONVERT_EXTS:
+            try:
+                thumb = PhotoLibrary._embedded_thumbnail(path, max_side)
+            except Exception:  # noqa: BLE001 - fall back to decoding the photo
+                thumb = None
+            if thumb is not None:
+                thumb.thumbnail((max_side, max_side))
+                buf = io.BytesIO()
+                thumb.convert("RGB").save(buf, "JPEG", quality=quality)
+                return buf.getvalue()
         with Image.open(path) as img:
             if img.format == "JPEG":
                 img.draft("RGB", (max_side, max_side))

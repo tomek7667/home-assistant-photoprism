@@ -17,6 +17,11 @@ PHOTOPRISM_NONE = "none"  # files only, PhotoPrism is not told
 PHOTOPRISM_INTEGRATION = "integration"  # reuse the PhotoPrism integration's connection
 PHOTOPRISM_APP_PASSWORD = "app_password"
 PHOTOPRISM_INTEGRATION_DOMAIN = "photoprism"
+
+# Similar photos: the sidecar service (see similarity/) and the dashboard view that shows them
+CONF_SIMILARITY_URL = "similarity_url"
+CONF_SIMILARITY_TOKEN = "similarity_token"
+CONF_SIMILAR_VIEW = "similar_view"
 EVENT_DELETED = "photoprism_library_deleted"
 
 DEFAULT_FOLDER = "/media"
