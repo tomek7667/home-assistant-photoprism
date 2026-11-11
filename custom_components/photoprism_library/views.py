@@ -6,7 +6,7 @@ from aiohttp import web
 from homeassistant.components.http import KEY_AUTHENTICATED, HomeAssistantView
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, PHOTO_EXTS
+from .const import DOMAIN, PHOTO_EXTS, VIDEO_EXTS
 from .library import PhotoLibrary, ext_of
 
 _CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
@@ -55,7 +55,7 @@ class ThumbView(_PhotoView):
 
     async def get(self, request: web.Request, path: str) -> web.StreamResponse:
         lib, real = await self._resolve(request, path)
-        if ext_of(path) not in PHOTO_EXTS:
+        if ext_of(path) not in PHOTO_EXTS | VIDEO_EXTS:  # videos: a frame
             raise web.HTTPNotFound
         try:
             data = await lib.async_jpeg(real, thumb=True)

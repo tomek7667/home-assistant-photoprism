@@ -28,6 +28,7 @@ from .const import (
     PHOTOPRISM_INTEGRATION_DOMAIN,
     PHOTOPRISM_NONE,
 )
+from .favorites import async_get_favorites
 from .library import PhotoLibrary
 from .photoprism import PhotoPrismClient
 from .views import ImageView, ThumbView
@@ -35,7 +36,7 @@ from .views import ImageView, ThumbView
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
 STATIC_URL = "/photoprism_library_static"
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 
 
 def _register_heif_opener() -> None:
@@ -89,6 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     lib.allow_delete = bool(options.get(CONF_ALLOW_DELETE, False))
     lib.photoprism = _photoprism_client(hass, options) if lib.allow_delete else None
     hass.data[DOMAIN] = lib
+    await async_get_favorites(hass)
 
     if not hass.data.get(_REGISTERED):  # routes and commands can't be removed; register once
         hass.http.register_view(ImageView(hass))

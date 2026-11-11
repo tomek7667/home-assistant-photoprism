@@ -15,7 +15,8 @@ from homeassistant.components.media_source import (
 )
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, IMAGE_URL, MIME, ON_THIS_DAY, RANDOM, THUMB_URL
+from .const import DOMAIN, FAVORITES, IMAGE_URL, MIME, ON_THIS_DAY, RANDOM, THUMB_URL, VIDEO_EXTS
+from .favorites import async_get_favorites
 from .library import PhotoLibrary, ext_of
 
 _LABELS = {
@@ -23,6 +24,7 @@ _LABELS = {
         "name": "PhotoPrism Library",
         "on_this_day": "On this day ({day} {month})",
         "random": "Random",
+        "favorites": "Favorites",
         "months": ["January", "February", "March", "April", "May", "June", "July",
                    "August", "September", "October", "November", "December"],
     },
@@ -30,6 +32,7 @@ _LABELS = {
         "name": "Zdjęcia",
         "on_this_day": "Tego dnia ({day} {month})",
         "random": "Losowe",
+        "favorites": "Ulubione",
         "months": ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca",
                    "sierpnia", "września", "października", "listopada", "grudnia"],
     },
@@ -79,6 +82,12 @@ class PhotoLibrarySource(MediaSource):
         if rel == RANDOM:
             photos = await lib.async_random()
             return self._folder(RANDOM, self._labels["random"], [self._file(p) for p in photos])
+        if rel == FAVORITES:
+            paths = [item["path"] for item in (await async_get_favorites(self.hass)).items()]
+            # Most recently added first; files removed outside Home Assistant are skipped
+            paths = await self.hass.async_add_executor_job(lambda: [p for p in paths if lib.safe_path(p)])
+            children = [self._file(p, "video" if ext_of(p) in VIDEO_EXTS else "image") for p in paths]
+            return self._folder(FAVORITES, self._labels["favorites"], children)
         try:
             dirs, files = await self.hass.async_add_executor_job(lib.list_dir, rel)
         except (FileNotFoundError, NotADirectoryError, PermissionError) as err:
@@ -88,6 +97,7 @@ class PhotoLibrarySource(MediaSource):
         if not rel:
             children.append(self._folder(ON_THIS_DAY, self._on_this_day_title(), None))
             children.append(self._folder(RANDOM, self._labels["random"], None))
+            children.append(self._folder(FAVORITES, self._labels["favorites"], None))
         children += [self._folder(f"{base}{d}", d, None) for d in dirs]
         children += [self._file(f"{base}{name}", kind) for name, kind in files]
         return self._folder(rel, os.path.basename(rel) or self.name, children)
@@ -118,6 +128,7 @@ class PhotoLibrarySource(MediaSource):
                 title=name,
                 can_play=True,
                 can_expand=False,
+                thumbnail=f"{THUMB_URL}{quote(rel)}",
             )
         mime = "image/jpeg" if self._lib.needs_conversion(rel) else MIME.get(ext, "image/jpeg")
         return BrowseMediaSource(

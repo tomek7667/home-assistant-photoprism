@@ -52,3 +52,4 @@ THUMB_URL = "/api/photoprism_library/thumb/"
 
 ON_THIS_DAY = "@on_this_day"
 RANDOM = "@random"
+FAVORITES = "@favorites"

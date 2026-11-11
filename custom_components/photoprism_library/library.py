@@ -9,6 +9,7 @@ import io
 import os
 import random
 import re
+import subprocess
 import time
 
 from PIL import Image, ImageOps
@@ -194,7 +195,7 @@ class PhotoLibrary:
         """
         rel = rel.strip("/")
         path = self.safe_path(rel)
-        if path is None or not os.path.isfile(path) or ext_of(rel) not in PHOTO_EXTS:
+        if path is None or not os.path.isfile(path) or ext_of(rel) not in PHOTO_EXTS | VIDEO_EXTS:
             raise FileNotFoundError(rel)
         stem = photo_stem(os.path.basename(rel))
         lib_dir = os.path.dirname(path)
@@ -255,6 +256,23 @@ class PhotoLibrary:
             img.save(buf, "JPEG", quality=quality)
             return buf.getvalue()
 
+    @staticmethod
+    def render_video_thumb(path: str, max_side: int, quality: int) -> bytes:
+        """A frame of a video as JPEG (1 s in, or the first frame of a shorter clip)."""
+        scale = f"scale='min({max_side},iw)':'min({max_side},ih)':force_original_aspect_ratio=decrease"
+        qscale = str(max(2, min(31, round((100 - quality) / 3))))
+        for seek in ("1", "0"):
+            result = subprocess.run(  # noqa: S603 - fixed arguments, path checked by safe_path
+                ["ffmpeg", "-v", "error", "-ss", seek, "-i", path, "-frames:v", "1", "-vf", scale,
+                 "-q:v", qscale, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout:
+                return result.stdout
+        raise ValueError(f"ffmpeg could not read a frame: {result.stderr.decode(errors='replace')[:200]}")
+
     # ---- async API ---------------------------------------------------------
 
     async def async_jpeg(self, path: str, thumb: bool) -> bytes:
@@ -264,8 +282,9 @@ class PhotoLibrary:
         if (data := cache.get_item(key)) is not None:
             return data
         size, quality = (THUMB_SIZE, THUMB_QUALITY) if thumb else (FULL_SIZE, FULL_QUALITY)
+        render = self.render_video_thumb if ext_of(path) in VIDEO_EXTS else self.render_jpeg
         async with self._decode:
-            data = await self.hass.async_add_executor_job(self.render_jpeg, path, size, quality)
+            data = await self.hass.async_add_executor_job(render, path, size, quality)
         cache.put(key, data)
         return data
 

@@ -1,19 +1,30 @@
-"""WebSocket API: delete a photo everywhere (admins only, when enabled in the options)."""
+"""WebSocket API: favourites, signed thumbnail URLs, and deleting a photo everywhere.
+
+Every logged-in user may use all of it; deleting also has to be enabled in the options.
+"""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 import os
 from typing import Any
+from urllib.parse import quote
 
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
-from homeassistant.core import HomeAssistant
+from homeassistant.components.http.auth import async_sign_path
+from homeassistant.core import HomeAssistant, callback
 
 from . import slideshow
-from .const import DOMAIN, EVENT_DELETED
+from .const import DOMAIN, EVENT_DELETED, IMAGE_URL, THUMB_URL
+from .favorites import async_get_favorites
 from .library import DeletePlan, PhotoLibrary
 from .photoprism import PhotoPrismError
+
+# Signed URLs handed to the cards; they are re-signed before this runs out
+_SIGN_FOR = timedelta(hours=6)
+_MAX_PATHS = 2000
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +33,9 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_config)
     websocket_api.async_register_command(hass, ws_delete_plan)
     websocket_api.async_register_command(hass, ws_delete)
+    websocket_api.async_register_command(hass, ws_favorites_subscribe)
+    websocket_api.async_register_command(hass, ws_favorites_set)
+    websocket_api.async_register_command(hass, ws_sign)
 
 
 def _library(hass: HomeAssistant, connection, msg) -> PhotoLibrary | None:
@@ -47,13 +61,12 @@ async def ws_config(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
     connection.send_result(
         msg["id"],
         {
-            "allow_delete": bool(lib and lib.allow_delete and connection.user.is_admin),
+            "allow_delete": bool(lib and lib.allow_delete),
             "photoprism": bool(lib and lib.photoprism),
         },
     )
 
 
-@websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): "photoprism_library/delete_plan", vol.Required("path"): str})
 @websocket_api.async_response
 async def ws_delete_plan(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
@@ -66,7 +79,6 @@ async def ws_delete_plan(hass: HomeAssistant, connection, msg: dict[str, Any]) -
     )
 
 
-@websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): "photoprism_library/delete", vol.Required("path"): str})
 @websocket_api.async_response
 async def ws_delete(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
@@ -87,6 +99,7 @@ async def ws_delete(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
         connection.send_error(msg["id"], "delete_failed", str(err))
         return
     lib.forget(plan)
+    (await async_get_favorites(hass)).async_forget([plan.rel, *plan.library_names])
     _LOGGER.warning(
         "Deleted photo %s by %s: files %s, PhotoPrism %s",
         plan.rel, connection.user.name, sorted({os.path.basename(f) for f in removed}) or "-", sorted(uids) or "-",
@@ -97,3 +110,62 @@ async def ws_delete(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
     )
     # Move slideshows off the deleted photo and reload their lists (in the background).
     hass.async_create_task(slideshow.async_refresh(hass, set(plan.library_names)))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "photoprism_library/favorites/subscribe"})
+@websocket_api.async_response
+async def ws_favorites_subscribe(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Send the favourites now and after every change (most recently added first)."""
+    favorites = await async_get_favorites(hass)
+
+    @callback
+    def push() -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], {"items": favorites.items()}))
+
+    connection.subscriptions[msg["id"]] = favorites.async_subscribe(push)
+    connection.send_result(msg["id"])
+    push()
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "photoprism_library/favorites/set",
+        vol.Required("paths"): vol.All([str], vol.Length(min=1, max=_MAX_PATHS)),
+        vol.Required("favorite"): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_favorites_set(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    lib: PhotoLibrary | None = hass.data.get(DOMAIN)
+    paths = [p.strip("/") for p in msg["paths"]]
+    if msg["favorite"]:
+        if lib is None:
+            connection.send_error(msg["id"], "not_ready", "PhotoPrism Library is not set up")
+            return
+        # Only files that exist in the library can be added
+        exists = await hass.async_add_executor_job(lambda: [p for p in paths if lib.safe_path(p)])
+        if missing := sorted(set(paths) - set(exists)):
+            connection.send_error(msg["id"], "not_found", f"Not in the library: {', '.join(missing[:5])}")
+            return
+    changed = (await async_get_favorites(hass)).async_set(paths, msg["favorite"])
+    connection.send_result(msg["id"], {"changed": changed})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "photoprism_library/sign",
+        vol.Required("paths"): vol.All([str], vol.Length(max=_MAX_PATHS)),
+        vol.Optional("full", default=False): bool,
+    }
+)
+@callback
+def ws_sign(hass: HomeAssistant, connection, msg: dict[str, Any]) -> None:
+    """Signed thumbnail (or full-size) URLs for many photos in one call."""
+    base = IMAGE_URL if msg["full"] else THUMB_URL
+    urls = {
+        path: async_sign_path(
+            hass, f"{base}{quote(path.strip('/'))}", _SIGN_FOR, refresh_token_id=connection.refresh_token_id
+        )
+        for path in msg["paths"]
+    }
+    connection.send_result(msg["id"], {"urls": urls, "expires_in": int(_SIGN_FOR.total_seconds())})
