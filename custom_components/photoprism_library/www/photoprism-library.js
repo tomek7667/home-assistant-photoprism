@@ -15,7 +15,7 @@
  * Every photo shows a heart (favourites are kept in Home Assistant, one list for
  * everyone) next to the delete button.
  */
-const VERSION = "1.4.0";
+const VERSION = "1.4.1";
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
@@ -1028,6 +1028,10 @@ Object.assign(TEXT.en, {
   deletedSome: (ok, failed) => `Deleted ${ok}, ${failed} could not be deleted`,
   noFavorites: "No favourites yet. Tap ♡ on a photo to add it here.",
   loading: "Loading…",
+  preparing: "Preparing…",
+  deleting: (done, total, name) => `Deleting ${done}/${total} · ${name}`,
+  stop: "Stop",
+  stopped: (ok) => `Stopped after deleting ${ok}`,
 });
 Object.assign(TEXT.pl, {
   favorites: "Ulubione",
@@ -1052,6 +1056,10 @@ Object.assign(TEXT.pl, {
   deletedSome: (ok, failed) => `Usunięto ${ok}, nie udało się usunąć ${failed}`,
   noFavorites: "Nie ma jeszcze ulubionych. Dotknij ♡ na zdjęciu, żeby je tu dodać.",
   loading: "Wczytywanie…",
+  preparing: "Przygotowywanie…",
+  deleting: (done, total, name) => `Usuwanie ${done}/${total} · ${name}`,
+  stop: "Zatrzymaj",
+  stopped: (ok) => `Zatrzymano po usunięciu ${ok}`,
 });
 
 const GRID_CSS = `
@@ -1061,9 +1069,14 @@ const GRID_CSS = `
   .head .title { flex: 1; min-width: 120px; font-size: 20px; font-weight: 500; color: var(--primary-text-color); }
   .head .title small { font-size: 14px; font-weight: 400; color: var(--secondary-text-color); margin-left: 6px; }
   .head select, .btn {
-    font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 18px; cursor: pointer;
+    font: inherit; font-size: 14px; line-height: 20px; padding: 6px 12px; border-radius: 18px; cursor: pointer;
     border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);
   }
+  /* The browser's own arrow hugs the rounded border; draw one with room around it */
+  .sort { position: relative; display: inline-flex; align-items: center; }
+  .sort select { appearance: none; -webkit-appearance: none; padding-right: 34px; }
+  .sort select option { background: var(--card-background-color); color: var(--primary-text-color); }
+  .sort .chev { position: absolute; right: 12px; pointer-events: none; color: var(--secondary-text-color); display: flex; }
   .btn { display: inline-flex; align-items: center; gap: 6px; }
   .btn.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
   .btn.danger { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: #fff; }
@@ -1095,7 +1108,19 @@ const GRID_CSS = `
     padding: 10px 16px; background: var(--card-background-color); border-top: 1px solid var(--divider-color);
   }
   .selecting .actions { display: flex; }
-  .actions .count { flex: 1; color: var(--primary-text-color); }
+  .actions .count { flex: 1; min-width: 140px; color: var(--primary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .actions .progress { display: none; flex-basis: 100%; height: 4px; border-radius: 2px; background: var(--divider-color); overflow: hidden; }
+  .actions .progress div { height: 100%; width: 0; background: var(--error-color, #db4437); transition: width 0.3s; }
+  .deleting .actions .progress { display: block; }
+  .deleting .actions .all, .deleting .actions .heart, .deleting .actions .delete { display: none; }
+  .tile.busy img { opacity: 0.35; }
+  .tile.busy::after {
+    content: ""; position: absolute; top: 50%; left: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+    border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: ppl-spin 0.8s linear infinite;
+  }
+  .tile.failed { outline: 3px solid var(--error-color, #db4437); outline-offset: -3px; }
+  .tile.gone { opacity: 0; transform: scale(0.6); transition: opacity 0.25s, transform 0.25s; }
+  @keyframes ppl-spin { to { transform: rotate(360deg); } }
 `;
 
 Object.assign(TEXT.en, {
@@ -1110,6 +1135,7 @@ Object.assign(TEXT.en, {
   noSimilar: "Nothing this similar. Move the slider to the left to see more.",
   searching: "Looking for similar photos…",
   similarFailed: (err) => `Could not search: ${err}`,
+  sourceGone: "This photo was deleted",
 });
 Object.assign(TEXT.pl, {
   similarTitle: "Podobne zdjęcia",
@@ -1123,14 +1149,18 @@ Object.assign(TEXT.pl, {
   noSimilar: "Nic tak podobnego. Przesuń suwak w lewo, żeby zobaczyć więcej.",
   searching: "Szukam podobnych zdjęć…",
   similarFailed: (err) => `Nie udało się wyszukać: ${err}`,
+  sourceGone: "To zdjęcie zostało usunięte",
 });
 
 const SIMILAR_CSS = `
   .source { display: flex; gap: 16px; align-items: center; padding: 0 16px 12px; }
-  .source img {
-    height: 180px; max-width: 50%; object-fit: contain; border-radius: 8px; cursor: pointer;
-    background: rgba(127, 127, 127, 0.15);
-  }
+  .source .tile.src { aspect-ratio: auto; height: 180px; max-width: 50%; border-radius: 8px; flex: none; }
+  .source .tile.src img { width: auto; height: 100%; max-width: 100%; object-fit: contain; }
+  .source .tile.src .ppl-tools { top: 8px; right: 8px; gap: 6px; }
+  .source .tile.src .ppl-tool { width: 36px; height: 36px; }
+  .selecting .source .tile.src .ppl-tools { display: none; }
+  .source .tile.src .check { top: 8px; right: 8px; }
+  .source.deleted .tile.src { opacity: 0.35; pointer-events: none; }
   .source .meta { color: var(--secondary-text-color); font-size: 14px; line-height: 1.5; word-break: break-all; }
   .source .meta b { display: block; font-size: 22px; color: var(--primary-text-color); word-break: normal; }
   .tile .score {
@@ -1165,7 +1195,7 @@ const queryPhoto = () => new URLSearchParams(window.location.search).get("photo"
 class PhotoPrismLibraryGrid extends HTMLElement {
   setConfig(config) {
     this._config = {
-      source: "favorites", tile_size: 140, min_similarity: 65, max_similarity: 100, similarity: 80, limit: 300,
+      source: "favorites", tile_size: 140, min_similarity: 30, max_similarity: 100, similarity: 80, limit: 300,
       ...config,
     };
     this._similar = this._config.source === "similar";
@@ -1201,7 +1231,11 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   }
 
   connectedCallback() {
-    this._onFavorites ||= () => (this._similar ? this._syncSelection() : this._refresh());
+    this._onFavorites ||= () => {
+      if (this._deleting) return; // redrawn when the deleting is done
+      if (this._similar) this._syncSelection();
+      else this._refresh();
+    };
     this._onLocation ||= () => {
       if (this._similar && this._built && queryPhoto() !== this._photo) this._refresh();
     };
@@ -1222,11 +1256,11 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     const t = this._t;
     const sortLabel = (s) => (s === "added" && this._similar ? t.sortScore : t[`sort${s[0].toUpperCase()}${s.slice(1)}`]);
     const { min_similarity: lo, max_similarity: hi } = this._config;
-    this.shadowRoot.innerHTML = `<style>${GRID_CSS}${SIMILAR_CSS}</style>
+    this.shadowRoot.innerHTML = `<style>${BUTTON_CSS}${GRID_CSS}${SIMILAR_CSS}</style>
       <ha-card style="--ppl-tile:${Number(this._config.tile_size) || 140}px">
         <div class="head">
           <div class="title"></div>
-          <select aria-label="sort">${SORTS.map((s) => `<option value="${s}">${sortLabel(s)}</option>`).join("")}</select>
+          <label class="sort"><select aria-label="sort">${SORTS.map((s) => `<option value="${s}">${sortLabel(s)}</option>`).join("")}</select><span class="chev"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg></span></label>
           <button class="btn select-toggle">${t.select}</button>
         </div>
         ${this._similar ? '<div class="source"></div>' : ""}
@@ -1237,6 +1271,7 @@ class PhotoPrismLibraryGrid extends HTMLElement {
           <div class="hints"><span>${t.loose}</span><span>${t.near}</span></div>
         </div>` : ""}
         <div class="actions">
+          <div class="progress"><div></div></div>
           <span class="count"></span>
           <button class="btn all">${t.selectAll}</button>
           <button class="btn heart">${HEART_SMALL}<span></span></button>
@@ -1257,9 +1292,12 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       this._render();
     });
     root.querySelector(".select-toggle").addEventListener("click", () => this._setSelecting(!this._selecting));
-    root.querySelector(".cancel").addEventListener("click", () => this._setSelecting(false));
+    root.querySelector(".cancel").addEventListener("click", () => {
+      if (this._deleting) this._stopDeleting = true; // finish the photos in progress, then stop
+      else this._setSelecting(false);
+    });
     root.querySelector(".all").addEventListener("click", () => {
-      const all = this._ordered().map((i) => i.path);
+      const all = this._selectable();
       this._selected = this._selected.size === all.length ? new Set() : new Set(all);
       this._syncSelection();
     });
@@ -1299,6 +1337,13 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     return favorites.items.map((i) => ({ ...mediaItem(i.path), added: i.added, date: dateKey(i.path) }));
   }
 
+  /** Everything select mode can pick: the grid, plus the photo searched for. */
+  _selectable() {
+    const paths = this._ordered().map((i) => i.path);
+    if (this._similar && this._photo && !this._sourceGone) paths.unshift(this._photo);
+    return paths;
+  }
+
   _ordered() {
     const items = this._baseItems();
     if (this._sort === "added") return items;
@@ -1331,6 +1376,7 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     const token = (this._searchToken = (this._searchToken || 0) + 1);
     if (photo !== this._photo) {
       this._photo = photo;
+      this._sourceGone = false;
       this._selected.clear();
       this._results = [];
       this._renderSource();
@@ -1374,17 +1420,44 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     }
     const date = photoDate(photo);
     const name = photo.split("/").pop();
-    this._sourceEl.innerHTML = `<img alt=""><div class="meta">${date ? `<b>${date.day}.${date.month}.${date.year}</b>` : ""}${name}</div>`;
-    const img = this._sourceEl.querySelector("img");
-    img.addEventListener("click", () =>
-      openLightbox(this._hass, [{ ...mediaItem(photo), thumb: img.src || undefined }], 0, this._config.language),
+    this._sourceEl.classList.remove("deleted");
+    this._sourceEl.innerHTML =
+      `<div class="tile src ppl-host"><img alt=""><span class="check">${CHECK_ICON}</span></div>` +
+      `<div class="meta">${date ? `<b>${date.day}.${date.month}.${date.year}</b>` : ""}${name}</div>`;
+    const tile = this._sourceEl.querySelector(".tile");
+    tile.dataset.path = photo;
+    const img = tile.querySelector("img");
+    // The same heart and delete button as everywhere, for the photo searched for too
+    const tools = toolbar();
+    tools.appendChild(favoriteButton(this._hass, () => photo, this._config.language));
+    if (await deleteAllowed(this._hass)) {
+      tools.appendChild(deleteButton(this._hass, () => photo, () => this._markSourceGone(photo), this._config.language));
+    }
+    if (photo !== this._photo) return;
+    tile.appendChild(tools);
+    this._pressable(tile, photo, () =>
+      openLightbox(this._hass, [{ ...mediaItem(photo), thumb: img.src || undefined }], 0, this._config.language,
+        () => this._markSourceGone(photo)),
     );
+    this._syncSelection();
     try {
       const res = await this._hass.callWS({ type: "photoprism_library/sign", paths: [photo] });
       if (photo === this._photo) img.src = res.urls[photo];
     } catch {
       // the name and date still show
     }
+  }
+
+  /** The photo searched for was deleted: keep its similar photos, show it as gone. */
+  _markSourceGone(photo) {
+    if (photo !== this._photo || !this._sourceEl) return;
+    this._sourceGone = true;
+    this._selected.delete(photo);
+    this._sourceEl.classList.add("deleted");
+    this._sourceEl.querySelector(".ppl-tools")?.remove();
+    const meta = this._sourceEl.querySelector(".meta");
+    if (meta) meta.insertAdjacentHTML("beforeend", `<div>${this._t.sourceGone}</div>`);
+    this._syncSelection();
   }
 
   /** Signed thumbnail URLs, fetched for many photos at once and renewed before they expire. */
@@ -1414,8 +1487,9 @@ class PhotoPrismLibraryGrid extends HTMLElement {
         ? t.shownOf(this._results.length, this._total) : this._total ? t.found(this._total) : "";
     }
     if (!items.length) {
-      this._body.innerHTML = `<div class="empty">${this._status || t.noFavorites}</div>`;
-      this._setSelecting(false);
+      this._body.innerHTML = `<div class="empty">${this._status || (this._similar ? t.noSimilar : t.noFavorites)}</div>`;
+      if (!this._deleting) this._setSelecting(false);
+      this._syncSelection();
       return;
     }
     const groups = [];
@@ -1450,17 +1524,29 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       `<span class="check">${CHECK_ICON}</span>`;
     const url = this._urls.get(item.path);
     if (url) tile.querySelector("img").src = url;
-    // A long press starts selecting, without opening the photo
+    this._pressable(tile, item.path, () =>
+      openLightbox(
+        this._hass, items.map(({ id, path, kind }) => ({ id, path, kind, thumb: this._urls.get(path) })), index,
+        this._config.language, (gone) => this._forget(gone),
+      ),
+    );
+    return tile;
+  }
+
+  /** Tap opens (or selects in select mode); a long press starts selecting. */
+  _pressable(tile, path, open) {
     let timer;
     let longPressed = false;
     let start;
     tile.addEventListener("pointerdown", (ev) => {
+      if (ev.composedPath().some((el) => el.classList?.contains("ppl-tool"))) return; // heart / delete
       longPressed = false;
       start = [ev.clientX, ev.clientY];
       timer = setTimeout(() => {
         longPressed = true;
+        if (this._deleting) return;
         if (!this._selecting) this._setSelecting(true);
-        this._toggle(item.path);
+        this._toggle(path);
       }, 500);
     });
     tile.addEventListener("pointermove", (ev) => {
@@ -1468,17 +1554,12 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     });
     for (const type of ["pointerup", "pointerleave", "pointercancel"]) tile.addEventListener(type, () => clearTimeout(timer));
     tile.addEventListener("contextmenu", (ev) => ev.preventDefault());
-    tile.addEventListener("click", () => {
-      if (longPressed) return;
-      if (this._selecting) this._toggle(item.path);
-      else {
-        openLightbox(
-          this._hass, items.map(({ id, path, kind }) => ({ id, path, kind, thumb: this._urls.get(path) })), index,
-          this._config.language, (gone) => this._forget(gone),
-        );
-      }
+    tile.addEventListener("click", (ev) => {
+      if (longPressed || this._deleting) return;
+      if (ev.composedPath().some((el) => el.classList?.contains("ppl-tool"))) return;
+      if (this._selecting) this._toggle(path);
+      else open();
     });
-    return tile;
   }
 
   /** A photo was deleted in the full-screen viewer. */
@@ -1505,7 +1586,10 @@ class PhotoPrismLibraryGrid extends HTMLElement {
 
   _syncSelection() {
     if (!this._body) return;
-    for (const tile of this._body.querySelectorAll(".tile")) tile.classList.toggle("sel", this._selected.has(tile.dataset.path));
+    for (const tile of this.shadowRoot.querySelectorAll(".tile[data-path]")) {
+      tile.classList.toggle("sel", this._selected.has(tile.dataset.path));
+    }
+    if (this._deleting) return; // the action bar shows the progress
     const n = this._selected.size;
     const t = this._t;
     this._countEl.textContent = t.selected(n);
@@ -1527,39 +1611,78 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   }
 
   async _deleteSelection() {
-    const paths = [...this._selected];
-    if (!paths.length) return;
+    const paths = this._selectable().filter((p) => this._selected.has(p)); // in grid order
+    if (!paths.length || this._deleting) return;
     const t = this._t;
+    const bar = this.shadowRoot.querySelector(".actions .progress div");
+    const cancel = this.shadowRoot.querySelector(".actions .cancel");
     this._deleteBtn.disabled = true;
+    this._countEl.textContent = t.preparing;
+    let plans;
     try {
-      const plans = await Promise.all(
-        paths.map((path) => this._hass.callWS({ type: "photoprism_library/delete_plan", path })),
-      );
-      const files = plans.flatMap((p) => p.files);
-      const shown = files.slice(0, 15).join("\n") + (files.length > 15 ? `\n${t.more(files.length - 15)}` : "");
-      if (!window.confirm(t.confirmMany(paths.length, shown, plans.some((p) => p.photoprism)))) return;
-      const deleted = [];
-      for (const path of paths) {
+      plans = await Promise.all(paths.map((path) => this._hass.callWS({ type: "photoprism_library/delete_plan", path })));
+    } catch (err) {
+      notify(this, t.failed(err?.message || err?.code || err));
+      this._syncSelection();
+      return;
+    }
+    const files = plans.flatMap((p) => p.files);
+    const shown = files.slice(0, 15).join("\n") + (files.length > 15 ? `\n${t.more(files.length - 15)}` : "");
+    if (!window.confirm(t.confirmMany(paths.length, shown, plans.some((p) => p.photoprism)))) {
+      this._syncSelection();
+      return;
+    }
+    this._deleting = true;
+    this._stopDeleting = false;
+    this._card.classList.add("deleting");
+    cancel.textContent = t.stop;
+    const tileOf = (path) => this.shadowRoot.querySelector(`.tile[data-path="${CSS.escape(path)}"]`);
+    const deleted = [];
+    const failed = [];
+    let started = 0;
+    const show = (name) => {
+      this._countEl.textContent = t.deleting(Math.min(started, paths.length), paths.length, name);
+      bar.style.width = `${(100 * (deleted.length + failed.length)) / paths.length}%`;
+    };
+    // Two at a time: quicker, and the bar still moves photo by photo
+    const queue = [...paths];
+    const worker = async () => {
+      while (queue.length && !this._stopDeleting) {
+        const path = queue.shift();
+        started += 1;
+        show(path.split("/").pop());
+        const tile = tileOf(path);
+        tile?.classList.add("busy");
         try {
           await this._hass.callWS({ type: "photoprism_library/delete", path });
           deleted.push(path);
+          this._selected.delete(path);
+          tile?.classList.replace("busy", "gone");
+          if (path === this._photo) this._markSourceGone(path);
         } catch {
-          // counted below
+          failed.push(path);
+          tile?.classList.replace("busy", "failed");
         }
+        show(path.split("/").pop());
       }
-      notify(this, deleted.length === paths.length ? t.deletedMany(deleted.length) : t.deletedSome(deleted.length, paths.length - deleted.length));
-      this._setSelecting(false);
-      if (this._similar && deleted.length) {
-        const gone = new Set(deleted);
-        this._results = this._results.filter((r) => !gone.has(r.path));
-        this._total = Math.max(0, this._total - deleted.length);
-        this._render();
-      }
-    } catch (err) {
-      notify(this, t.failed(err?.message || err?.code || err));
-    } finally {
-      this._deleteBtn.disabled = this._selected.size === 0;
+    };
+    await Promise.all([worker(), worker()]);
+    const stopped = this._stopDeleting && queue.length > 0;
+    this._deleting = false;
+    this._card.classList.remove("deleting");
+    cancel.textContent = t.cancel;
+    bar.style.width = "0";
+    notify(this, stopped ? t.stopped(deleted.length)
+      : failed.length ? t.deletedSome(deleted.length, failed.length) : t.deletedMany(deleted.length));
+    if (this._similar && deleted.length) {
+      const gone = new Set(deleted);
+      this._results = this._results.filter((r) => !gone.has(r.path));
+      this._total = Math.max(0, this._total - deleted.length);
     }
+    // Failed (or not yet deleted) photos stay selected to try again
+    this._selected = new Set(paths.filter((p) => !deleted.includes(p)));
+    if (!this._selected.size) this._setSelecting(false);
+    this._render();
   }
 
   getCardSize() {

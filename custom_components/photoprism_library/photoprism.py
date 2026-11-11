@@ -1,6 +1,7 @@
 """Minimal PhotoPrism API client: find photos by file name, archive and delete them."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -92,10 +93,19 @@ class PhotoPrismClient:
         uids: set[str] = set()
         wanted = {_stem(n) for n in file_names}
         # Normal searches skip photos in review, private or archived; look there too.
+        # The searches don't depend on each other, so they run side by side.
         scopes = ({}, {"review": "true"}, {"private": "true"}, {"archived": "true"})
-        for name, scope in ((n, s) for n in file_names for s in scopes):
-            params = {"count": 20, "offset": 0, "merged": "true", "filename": name, **scope}
-            photos = await self._request("GET", "/api/v1/photos", params=params)
+        results = await asyncio.gather(
+            *(
+                self._request(
+                    "GET", "/api/v1/photos",
+                    params={"count": 20, "offset": 0, "merged": "true", "filename": name, **scope},
+                )
+                for name in file_names
+                for scope in scopes
+            )
+        )
+        for photos in results:
             for photo in photos or []:
                 # A photo's files (HEIC, Live Photo MOV, RAW...) share the stem; Name has no extension.
                 stems = {_stem(str(f.get("Name", ""))) for f in photo.get("Files") or []}

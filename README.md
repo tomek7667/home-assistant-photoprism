@@ -171,11 +171,11 @@ The 🔍 button needs the similar-photo service from the [`similarity`](similari
    ```yaml
    type: custom:photoprism-library-grid
    source: similar
-   similarity: 80        # default threshold in %; the slider goes from min_similarity (65) to max_similarity (100)
+   similarity: 80        # default threshold in %; the slider goes from min_similarity (30) to max_similarity (100)
    limit: 300            # most results shown
    ```
 
-The view shows the photo on top, the results most similar first with their similarity, and a slider under them: to the right only near-duplicates (bursts, edited copies), in the middle photos of the same scene, to the left loosely related ones. Select mode works here too, handy for cleaning up bursts. A sensor shows how much of the library has been analysed.
+The view shows the photo on top, the results most similar first with their similarity, and a slider under them: to the right only near-duplicates (bursts, edited copies), in the middle photos of the same scene, to the left loosely related ones. The photo searched for has a heart and a delete button too and can be selected with the results. Select mode works here, handy for cleaning up bursts; deleting several shows which photo is being deleted and can be stopped. A sensor shows how much of the library has been analysed.
 
 ## How it works
 

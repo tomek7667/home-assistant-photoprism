@@ -15,6 +15,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.components.http.auth import async_sign_path
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 
 from . import slideshow
 from .const import DOMAIN, EVENT_DELETED, IMAGE_URL, THUMB_URL
@@ -22,6 +23,11 @@ from .favorites import async_get_favorites
 from .library import DeletePlan, PhotoLibrary
 from .photoprism import PhotoPrismError
 from .similarity import SimilarityError
+
+# Slideshows are reloaded once after a burst of deletions, not after each photo
+_SLIDESHOW_DELAY = 1.5
+_gone_for_slideshows: set[str] = set()
+_slideshow_timer = None
 
 # Signed URLs handed to the cards; they are re-signed before this runs out
 _SIGN_FOR = timedelta(hours=6)
@@ -112,8 +118,26 @@ async def ws_delete(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
     connection.send_result(
         msg["id"], {"removed": sorted({os.path.basename(f) for f in removed}), "photoprism": sorted(uids)}
     )
-    # Move slideshows off the deleted photo and reload their lists (in the background).
-    hass.async_create_task(slideshow.async_refresh(hass, set(plan.library_names)))
+    _schedule_slideshow_refresh(hass, set(plan.library_names))
+
+
+@callback
+def _schedule_slideshow_refresh(hass: HomeAssistant, gone: set[str]) -> None:
+    """Move slideshows off deleted photos and reload their lists, once per burst of deletions."""
+    global _slideshow_timer  # noqa: PLW0603
+    _gone_for_slideshows.update(gone)
+    if _slideshow_timer is not None:
+        _slideshow_timer()
+
+    @callback
+    def _run(_now) -> None:
+        global _slideshow_timer  # noqa: PLW0603
+        _slideshow_timer = None
+        batch = set(_gone_for_slideshows)
+        _gone_for_slideshows.clear()
+        hass.async_create_task(slideshow.async_refresh(hass, batch))
+
+    _slideshow_timer = async_call_later(hass, _SLIDESHOW_DELAY, _run)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "photoprism_library/favorites/subscribe"})
