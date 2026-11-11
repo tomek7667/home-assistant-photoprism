@@ -42,7 +42,7 @@ _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
 PLATFORMS = [Platform.SENSOR]
 STATIC_URL = "/photoprism_library_static"
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 
 
 def _register_heif_opener() -> None:

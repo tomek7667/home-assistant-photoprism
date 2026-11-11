@@ -287,12 +287,17 @@ class PhotoLibrary:
 
     @staticmethod
     def render_video_thumb(path: str, max_side: int, quality: int) -> bytes:
-        """A frame of a video as JPEG (1 s in, or the first frame of a shorter clip)."""
+        """A frame of a video as JPEG: the first keyframe from 1 s on, or the first frame of a shorter clip.
+
+        Only keyframes are decoded (-skip_frame nokey). Seeking to 1 s otherwise decodes every
+        frame before it, ~5 s for a 4K HEVC iPhone video on a Raspberry Pi 5; this takes ~0.8 s
+        and gives the same frame, as iPhones put a keyframe every second.
+        """
         scale = f"scale='min({max_side},iw)':'min({max_side},ih)':force_original_aspect_ratio=decrease"
         qscale = str(max(2, min(31, round((100 - quality) / 3))))
         for seek in ("1", "0"):
             result = subprocess.run(  # noqa: S603 - fixed arguments, path checked by safe_path
-                ["ffmpeg", "-v", "error", "-ss", seek, "-i", path, "-frames:v", "1", "-vf", scale,
+                ["ffmpeg", "-v", "error", "-skip_frame", "nokey", "-ss", seek, "-i", path, "-frames:v", "1", "-vf", scale,
                  "-q:v", qscale, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
                 capture_output=True,
                 timeout=60,
