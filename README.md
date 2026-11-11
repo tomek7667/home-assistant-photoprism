@@ -14,7 +14,8 @@ Built for PhotoPrism's `originals` folder, but it works with any folder of photo
 - **Screenshots left out** (PNG/GIF) of the smart folders. You can turn this off in the options.
 - **Symlink-friendly.** PhotoPrism originals are often symlinks into another folder, and you can allow those target folders. Nothing outside the folders you configure is ever served.
 - **Works with slideshow cards.** Point a media-source slideshow such as [Album Slideshow](https://github.com/eyalgal/album_slideshow) at `media-source://photoprism_library/@on_this_day` or `media-source://photoprism_library/@random`.
-- **Delete photos for good (optional).** Admins get a trash button when hovering over a photo preview in the media browser and on the slideshow card. After confirming, the photo is removed from PhotoPrism, from disk (with its Live Photo video, edits, RAW and sidecar files) and from Home Assistant.
+- **Favourites ♥.** Every photo (viewer, slideshows, media browser preview) has a heart. Favourites are kept in Home Assistant, one list for everyone, and shown in the `photoprism-library-grid` card or played from the `@favorites` folder.
+- **Delete photos for good (optional).** A trash button next to the heart. After confirming, the photo is removed from PhotoPrism, from disk (with its Live Photo video, edits, RAW and sidecar files) and from Home Assistant.
 - **Translations:** English and Polish.
 
 ## Installation
@@ -69,7 +70,7 @@ Deleting is off by default. To use it:
 2. Open the integration options and turn on **Allow deleting photos**. Choose how PhotoPrism is told:
    - reuse the connection of the [PhotoPrism integration](https://github.com/ice413/hass-photoprism), if you have it set up, or
    - an **app password** (PhotoPrism: *Settings → Account → Apps and Devices*) with the PhotoPrism URL.
-3. Reload the browser. Admins now see a trash button when hovering over a photo preview (media browser) or the `photoprism-library-slideshow` card.
+3. Reload the browser. Every logged-in user now sees a trash button when hovering over a photo preview (media browser), the viewer, the grid's full-screen view and the `photoprism-library-slideshow` card.
 
 The button first lists every file that will be deleted and asks for confirmation. Then it:
 
@@ -94,7 +95,7 @@ For a nicer card, use `custom:photoprism-library-slideshow` with the same option
 
 - **◀ ▶ arrows** on the photo (on hover) with a loading spinner, for fast previous/next
 - **the year the photo was taken** in the bottom-right corner, e.g. *2020 · 6 years ago* (great for On this day)
-- **the delete button** (when deleting is enabled, admins only)
+- **the heart** (favourites) and **the delete button** (when deleting is enabled)
 
 ```yaml
 type: custom:photoprism-library-slideshow
@@ -117,7 +118,8 @@ It sets Album Slideshow's `tap_pause_seconds` to 0 unless you set it yourself. O
 - **◀ ▶ arrows**, the **← → keys** and **Delete** while the pointer is over the card, and **swipe** on touch screens
 - a **12 / 500** counter and the **date** the photo was taken: *12.05.2023* for Random and folders, or the year and how long ago (*2020 · 6 years ago*) for On this day
 - **🔀** for a new random selection (for the `@random` folder)
-- the **delete button** (when deleting is enabled, admins only). It always acts on the photo on screen, and the next photo takes its place immediately
+- the **heart** (or the **F** key) and the **delete button** (when deleting is enabled). They always act on the photo on screen; after deleting, the next photo takes its place immediately
+- videos play in place
 
 ```yaml
 type: custom:photoprism-library-viewer
@@ -125,10 +127,28 @@ folder: "@random"      # or "@on_this_day", or a folder such as 2023/07
 show_year: true        # show when the photo was taken
 date_format: date      # "date" = DD.MM.YYYY (default for @random), "year" = year and how long ago (default otherwise)
 delete_button: true
+favorite_button: true
 autoplay: 0            # seconds between photos, 0 = manual
 aspect_ratio: 16/9
 language: en           # optional
 ```
+
+## Favourites grid card
+
+`custom:photoprism-library-grid` shows the favourites as a grid of thumbnails, for example as its own dashboard view (`type: panel`):
+
+- sorted by **recently added** (default), **newest** or **oldest photos**, or **by year** with headings. The choice is remembered per browser
+- tap a photo for the **full-screen viewer** (arrows, ← → keys, swipe, heart, delete, **Esc** or ✕ to close); videos play there
+- **Select** (or a long press on a photo) to pick several, then **remove them from favourites** or **delete** them with one confirmation
+
+```yaml
+type: custom:photoprism-library-grid
+source: favorites
+tile_size: 140         # px, minimum tile width
+language: en           # optional
+```
+
+Favourites are stored in `.storage/photoprism_library.favorites` as library paths. A deleted photo is removed from them automatically.
 
 ## How it works
 
@@ -136,8 +156,11 @@ language: en           # optional
 |---|---|
 | `media-source://photoprism_library/<path>` | Browse folders and photos |
 | `/api/photoprism_library/image/<path>` | The photo: HEIC as JPEG (max 2560 px), anything else unchanged |
-| `/api/photoprism_library/thumb/<path>` | 360 px JPEG thumbnail |
-| WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Admin only, when deleting is enabled |
+| `/api/photoprism_library/thumb/<path>` | 360 px JPEG thumbnail (a frame for videos) |
+| `media-source://photoprism_library/@favorites` | The favourites, most recently added first |
+| WebSocket `photoprism_library/favorites/subscribe`, `…/favorites/set` | Read and change the favourites |
+| WebSocket `photoprism_library/sign` | Signed thumbnail URLs for many photos at once |
+| WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Any logged-in user, when deleting is enabled |
 
 Both HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two conversions run at once, so small hosts like a Raspberry Pi stay responsive.
 
