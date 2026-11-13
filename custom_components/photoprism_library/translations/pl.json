@@ -34,7 +34,8 @@
           "photoprism_token": "Hasło aplikacji PhotoPrism",
           "similarity_url": "Adres usługi podobnych zdjęć",
           "similarity_token": "Token usługi podobnych zdjęć",
-          "similar_view": "Widok dashboardu z podobnymi zdjęciami"
+          "similar_view": "Widok dashboardu z podobnymi zdjęciami",
+          "album_view": "Widok dashboardu z albumem jako siatką"
         },
         "data_description": {
           "allow_delete": "Każdy zalogowany użytkownik dostaje przycisk usuwania na podglądzie zdjęcia, w przeglądarce, siatce i karcie pokazu slajdów. Usunięcie kasuje pliki zdjęcia z dysku (Home Assistant potrzebuje zapisu do folderów ze zdjęciami) i nie da się go cofnąć.",
@@ -43,7 +44,8 @@
           "photoprism_token": "Tylko dla opcji z hasłem aplikacji. Utworzysz je w PhotoPrism: Ustawienia → Konto → Aplikacje i urządzenia. Zostaw puste, aby zachować zapisane.",
           "similarity_url": "Opcjonalnie. Usługa z katalogu similarity tego repozytorium, np. http://127.0.0.1:8765. Puste wyłącza przycisk podobnych zdjęć.",
           "similarity_token": "Tylko jeśli usługa ma ustawiony TOKEN. Zostaw puste, żeby zachować zapisany.",
-          "similar_view": "Ścieżka widoku z kartą photoprism-library-grid (source: similar), np. /zdjecia/podobne. Przycisk 🔍 otwiera go z danym zdjęciem."
+          "similar_view": "Ścieżka widoku z kartą photoprism-library-grid (source: similar), np. /zdjecia/podobne. Przycisk 🔍 otwiera go z danym zdjęciem.",
+          "album_view": "Ścieżka widoku z kartą photoprism-library-grid (source: folder), np. /zdjecia/album. Przycisk siatki na kartach pokazu slajdów i przeglądarki otwiera tam ich album, żeby zaznaczyć i usunąć kilka zdjęć naraz."
         }
       }
     },

@@ -15,6 +15,7 @@ Built for PhotoPrism's `originals` folder, but it works with any folder of photo
 - **Symlink-friendly.** PhotoPrism originals are often symlinks into another folder, and you can allow those target folders. Nothing outside the folders you configure is ever served.
 - **Works with slideshow cards.** Point a media-source slideshow such as [Album Slideshow](https://github.com/eyalgal/album_slideshow) at `media-source://photoprism_library/@on_this_day` or `media-source://photoprism_library/@random`.
 - **Favourites ♥.** Every photo (viewer, slideshows, media browser preview) has a heart. Favourites are kept in Home Assistant, one list for everyone, and shown in the `photoprism-library-grid` card or played from the `@favorites` folder.
+- **Albums as a grid ▦.** A button on the slideshow and viewer cards opens their album (e.g. On this day) as a grid of thumbnails, where several photos can be selected and deleted at once.
 - **Similar photos 🔍 (optional).** A button next to the heart opens photos that look like this one, from near-duplicates to the same kind of scene, with a slider for how similar. Uses an AI image model (SigLIP 2) in a small sidecar service; videos are compared by a frame.
 - **Delete photos for good (optional).** A trash button next to the heart. After confirming, the photo is removed from PhotoPrism, from disk (with its Live Photo video, edits, RAW and sidecar files) and from Home Assistant.
 - **Translations:** English and Polish.
@@ -62,6 +63,7 @@ The library appears in **Media → PhotoPrism Library**.
 | Leave PNG/GIF out of On this day and Random | on | Phone screenshots are usually PNG |
 | Allow deleting photos | off | See below |
 | Also delete in PhotoPrism | no | *No* (files only), *the PhotoPrism integration's connection*, or *an app password* |
+| Dashboard view for albums as a grid | – | Path of a view with a grid card (`source: folder`), e.g. `/photos/album`; turns on the ▦ button, see [Album grid](#album-grid) |
 
 ## Deleting photos
 
@@ -96,7 +98,8 @@ For a nicer card, use `custom:photoprism-library-slideshow` with the same option
 
 - **◀ ▶ arrows** on the photo (on hover) with a loading spinner, for fast previous/next
 - **the year the photo was taken** in the bottom-right corner, e.g. *2020 · 6 years ago* (great for On this day)
-- **the heart** (favourites) and **the delete button** (when deleting is enabled)
+- **which photo of how many** is on screen, e.g. *3 / 23*, under the year
+- **the heart** (favourites), **the delete button** (when deleting is enabled) and **▦** to open the album as a grid (see [Album grid](#album-grid))
 
 ```yaml
 type: custom:photoprism-library-slideshow
@@ -104,6 +107,7 @@ entity: camera.album_slideshow_on_this_day
 transition: fade
 duration: 1200
 show_year: true        # default false
+show_count: true       # "3 / 23" in the bottom-right corner; default true
 date_format: year      # "year" = year and how long ago (default), "date" = DD.MM.YYYY
 navigation: true       # default true
 delete_button: true    # default true; set false on shared wall panels
@@ -151,6 +155,18 @@ language: en           # optional
 
 Favourites are stored in `.storage/photoprism_library.favorites` as library paths. A deleted photo is removed from them automatically.
 
+## Album grid
+
+`source: folder` shows a whole album or library folder (with its subfolders, like Album Slideshow plays it) in the same grid, with the same sorting (plus **album order**; by year is the default, which suits On this day), full-screen viewer and select mode for (un)hearting or deleting several photos at once:
+
+```yaml
+type: custom:photoprism-library-grid
+source: folder
+folder: "@on_this_day"   # optional; without it the folder comes from the page URL (?folder=...)
+```
+
+To open albums from the slideshow and viewer cards, put a grid card **without** `folder` in its own view (a `subview` works well, its back arrow returns to where you came from) and set its path as **Dashboard view for albums as a grid** in the integration options. Every `photoprism-library-slideshow` card whose Album Slideshow plays a folder of this library, and every viewer card, then shows a ▦ button that opens its album there (not for Random, which is a new draw every time). Turn it off per card with `album_button: false`; `album_folder:` on a slideshow card overrides the folder it found.
+
 ## Similar photos
 
 The 🔍 button needs the similar-photo service from the [`similarity`](similarity/) folder, a small container that gives every photo and video (one frame) an image embedding with [SigLIP 2](https://huggingface.co/timm/ViT-B-16-SigLIP2) and answers "which photos look like this one" in milliseconds.
@@ -187,6 +203,7 @@ The view shows the photo on top, the results most similar first with their simil
 | `media-source://photoprism_library/@favorites` | The favourites, most recently added first |
 | WebSocket `photoprism_library/favorites/subscribe`, `…/favorites/set` | Read and change the favourites |
 | WebSocket `photoprism_library/sign` | Signed thumbnail URLs for many photos at once |
+| WebSocket `photoprism_library/config` | What the cards may show: delete, similar and album views, which folder each Album Slideshow camera plays |
 | WebSocket `photoprism_library/similar` | Similar photos (via the similar-photo service) |
 | WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Any logged-in user, when deleting is enabled |
 

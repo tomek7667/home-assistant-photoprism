@@ -3,13 +3,32 @@ from __future__ import annotations
 
 from urllib.parse import unquote
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, RANDOM
 
 _SLIDESHOW = "album_slideshow"
 _SOURCE_PREFIX = f"media-source://{DOMAIN}"
+
+
+@callback
+def album_folders(hass: HomeAssistant) -> dict[str, str]:
+    """The library folder each Album Slideshow camera plays, e.g. {"camera.album_slideshow_tego_dnia": "@on_this_day"}.
+
+    Only albums built on this media source; the cards use it to open the album as a grid.
+    """
+    ent_reg = er.async_get(hass)
+    folders: dict[str, str] = {}
+    for entry in hass.config_entries.async_loaded_entries(_SLIDESHOW):
+        content_id = str(entry.data.get("media_content_id", ""))
+        if content_id != _SOURCE_PREFIX and not content_id.startswith(f"{_SOURCE_PREFIX}/"):
+            continue
+        folder = unquote(content_id[len(_SOURCE_PREFIX):]).strip("/")
+        for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+            if ent.domain == "camera":
+                folders[ent.entity_id] = folder
+    return folders
 
 
 async def async_refresh(hass: HomeAssistant, gone: set[str] | None = None) -> None:

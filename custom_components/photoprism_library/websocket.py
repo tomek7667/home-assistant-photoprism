@@ -73,6 +73,9 @@ async def ws_config(hass: HomeAssistant, connection, msg: dict[str, Any]) -> Non
             "photoprism": bool(lib and lib.photoprism),
             "similar": bool(lib and lib.similarity),
             "similar_view": (lib.similar_view if lib and lib.similarity else ""),
+            "album_view": (lib.album_view if lib else ""),
+            # Album Slideshow cameras playing a folder of this library: camera entity -> folder
+            "albums": slideshow.album_folders(hass),
         },
     )
 

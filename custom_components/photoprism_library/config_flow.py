@@ -11,6 +11,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_ALBUM_VIEW,
     CONF_ALLOW_DELETE,
     CONF_EXTRA_FOLDERS,
     CONF_FOLDER,
@@ -137,6 +138,9 @@ class PhotoPrismLibraryOptionsFlow(OptionsFlow):
                     ),
                     vol.Optional(
                         CONF_SIMILAR_VIEW, description={"suggested_value": current.get(CONF_SIMILAR_VIEW, "")}
+                    ): str,
+                    vol.Optional(
+                        CONF_ALBUM_VIEW, description={"suggested_value": current.get(CONF_ALBUM_VIEW, "")}
                     ): str,
                 }
             ),

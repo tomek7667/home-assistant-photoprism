@@ -34,7 +34,8 @@
           "photoprism_token": "PhotoPrism app password",
           "similarity_url": "Similar-photo service URL",
           "similarity_token": "Similar-photo service token",
-          "similar_view": "Dashboard view for similar photos"
+          "similar_view": "Dashboard view for similar photos",
+          "album_view": "Dashboard view for albums as a grid"
         },
         "data_description": {
           "allow_delete": "Every logged-in user gets a delete button on photo previews, the viewer, the grid and the slideshow card. Deleting removes the photo's files from disk (Home Assistant needs write access to the photo folders) and cannot be undone.",
@@ -43,7 +44,8 @@
           "photoprism_token": "Only for the app password option. Create one in PhotoPrism: Settings → Account → Apps and Devices. Leave empty to keep the saved one.",
           "similarity_url": "Optional. The service from this repository's similarity folder, e.g. http://127.0.0.1:8765. Empty turns the similar-photo button off.",
           "similarity_token": "Only if the service was started with a TOKEN. Leave empty to keep the saved one.",
-          "similar_view": "Path of the dashboard view with a photoprism-library-grid card (source: similar), e.g. /photos/similar. The 🔍 button opens it with the photo."
+          "similar_view": "Path of the dashboard view with a photoprism-library-grid card (source: similar), e.g. /photos/similar. The 🔍 button opens it with the photo.",
+          "album_view": "Path of the dashboard view with a photoprism-library-grid card (source: folder), e.g. /photos/album. The grid button on the slideshow and viewer cards opens their album there, to select and delete several photos."
         }
       }
     },

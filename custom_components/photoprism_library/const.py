@@ -22,6 +22,8 @@ PHOTOPRISM_INTEGRATION_DOMAIN = "photoprism"
 CONF_SIMILARITY_URL = "similarity_url"
 CONF_SIMILARITY_TOKEN = "similarity_token"
 CONF_SIMILAR_VIEW = "similar_view"
+# Dashboard view with a grid card (source: folder) that shows a whole album (?folder=...)
+CONF_ALBUM_VIEW = "album_view"
 EVENT_DELETED = "photoprism_library_deleted"
 
 DEFAULT_FOLDER = "/media"

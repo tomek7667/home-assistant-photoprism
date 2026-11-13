@@ -99,6 +99,7 @@ class PhotoLibrary:
         self.photoprism = None  # PhotoPrismClient when deleting should also remove the photo there
         self.similarity = None  # SimilarityClient when the similar-photo service is configured
         self.similar_view = ""  # dashboard view that shows similar photos (?photo=<path>)
+        self.album_view = ""  # dashboard view that shows an album as a grid (?folder=<folder>)
         self._thumbs: _LRU = _LRU(4000)  # ~20 kB each
         self._fulls: _LRU = _LRU(20)
         self._decode = asyncio.Semaphore(2)  # keep small hosts responsive while converting

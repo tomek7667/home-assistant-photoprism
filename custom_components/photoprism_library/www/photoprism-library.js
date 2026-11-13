@@ -8,14 +8,16 @@
  *   (instant previous/next, keyboard, swipe, delete) for a library folder.
  * - Defines `custom:photoprism-library-slideshow`: an Album Slideshow card with
  *   previous/next arrows on the photo, a loading spinner, the year the photo
- *   was taken and the delete button.
- * - Defines `custom:photoprism-library-grid`: a grid of favourites with sorting,
- *   a full-screen viewer and a select mode for deleting or unhearting many at once.
+ *   was taken, which photo of how many it is, and the delete button.
+ * - Defines `custom:photoprism-library-grid`: a grid of favourites, similar photos or
+ *   a whole album, with sorting, a full-screen viewer and a select mode for deleting or
+ *   (un)hearting many at once. The slideshow and viewer cards get a ▦ button that opens
+ *   their album in it.
  *
  * Every photo shows a heart (favourites are kept in Home Assistant, one list for
  * everyone) next to the delete button.
  */
-const VERSION = "1.4.2";
+const VERSION = "1.5.0";
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
@@ -37,6 +39,7 @@ const TEXT = {
     unfavorite: "Remove from favourites",
     favFailed: (err) => `Could not change favourites: ${err}`,
     similar: "Similar photos",
+    albumGrid: "Show the album as a grid",
   },
   pl: {
     button: "Usuń trwale",
@@ -59,6 +62,7 @@ const TEXT = {
     unfavorite: "Usuń z ulubionych",
     favFailed: (err) => `Nie udało się zmienić ulubionych: ${err}`,
     similar: "Podobne zdjęcia",
+    albumGrid: "Pokaż album jako siatkę",
   },
 };
 
@@ -104,6 +108,17 @@ const CARD_CSS = `
   .ppl-year b.ppl-date { font-size: 24px; }
   .ppl-year span { font-size: 13px; opacity: 0.9; }
   .ppl-year:empty { opacity: 0; }
+  /* Slideshow: the year with "3 / 23" under it in the bottom-right corner */
+  .ppl-corner {
+    position: absolute; z-index: 4; right: 14px; bottom: 12px; pointer-events: none;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  }
+  .ppl-corner .ppl-year { position: static; }
+  .ppl-corner .ppl-pos {
+    padding: 2px 8px; border-radius: 11px; font-size: 13px; color: #fff; background: rgba(0, 0, 0, 0.45);
+    font-variant-numeric: tabular-nums;
+  }
+  .ppl-corner .ppl-pos:empty { display: none; }
 `;
 const ICON = (d, size = 22) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
@@ -124,6 +139,8 @@ const text = (hass, override) => {
   return TEXT[lang] || TEXT.en;
 };
 const currentHass = () => document.querySelector("home-assistant")?.hass;
+/** Text for innerHTML: names and messages can come from the page URL (?photo=, ?folder=). */
+const esc = (value) => String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const photoPath = (url) => {
   const match = (url || "").match(PHOTO_URL);
   return match ? decodeURIComponent(match[1]) : null;
@@ -271,6 +288,30 @@ async function similarButton(hass, getPath, lang, beforeNavigate) {
   return button;
 }
 
+const ALBUM_ICON = ICON("M3,11H11V3H3M3,21H11V13H3M13,21H21V13H13M13,3V11H21V3");
+
+/**
+ * The ▦ button: opens the album view set in the integration options with this folder,
+ * or resolves to null when no album view is set or the folder is unknown. Not for
+ * Random: every listing of it is a new draw, so the grid would show other photos.
+ */
+async function albumButton(hass, folder, lang) {
+  const config = await integrationConfig(hass);
+  if (!config.album_view || !folder || folder === "@random") return null;
+  const button = document.createElement("button");
+  button.className = "ppl-tool ppl-album";
+  const label = text(hass, lang).albumGrid;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = ALBUM_ICON;
+  button.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    navigate(`${config.album_view}?folder=${encodeURIComponent(folder)}`);
+  });
+  return button;
+}
+
 async function deletePhoto(hass, path, el, lang) {
   const t = text(hass, lang);
   try {
@@ -378,13 +419,16 @@ customElements.whenDefined("hui-dialog-web-browser-play-media").then(() => {
 /* ---- Slideshow card ------------------------------------------------------- */
 
 const OWN_KEYS = [
-  "type", "delete_button", "favorite_button", "similar_button", "navigation", "show_year", "date_format", "language",
+  "type", "delete_button", "favorite_button", "similar_button", "album_button", "album_folder", "navigation",
+  "show_year", "show_count", "date_format", "language",
 ];
 
 class PhotoPrismLibrarySlideshow extends HTMLElement {
   setConfig(config) {
     if (!config?.entity?.startsWith("camera.")) throw new Error("entity (an Album Slideshow camera) is required");
-    this._config = { delete_button: true, favorite_button: true, navigation: true, show_year: false, ...config };
+    this._config = {
+      delete_button: true, favorite_button: true, navigation: true, show_year: false, show_count: true, ...config,
+    };
     this._build();
   }
 
@@ -408,7 +452,10 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
     host.appendChild(card);
     this._spinner = Object.assign(document.createElement("div"), { className: "ppl-spinner" });
     this._year = Object.assign(document.createElement("div"), { className: "ppl-year" });
-    host.append(this._spinner, this._year);
+    this._pos = Object.assign(document.createElement("div"), { className: "ppl-pos" });
+    const corner = Object.assign(document.createElement("div"), { className: "ppl-corner" });
+    corner.append(this._year, this._pos);
+    host.append(this._spinner, corner);
     if (this._config.navigation) {
       host.append(this._navButton("prev", PREV_ICON, -1), this._navButton("next", NEXT_ICON, 1));
     }
@@ -427,24 +474,55 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
         (btn) => btn && tools.isConnected !== false && tools.prepend(btn),
       );
     }
+    if (this._config.album_button !== false) {
+      // The album this slideshow plays (album_folder, or found from its Album Slideshow entry)
+      const h = this._hass || currentHass();
+      integrationConfig(h)
+        .then((cfg) => albumButton(h, this._config.album_folder || cfg.albums?.[this._config.entity], this._config.language))
+        .then((btn) => {
+          // Next to 🔍, before the heart and the trash can
+          const before = [this._favBtn, this._deleteBtn].find((b) => b?.parentNode === tools) || null;
+          if (btn && tools === this._tools) tools.insertBefore(btn, before);
+        });
+    }
     this.shadowRoot.appendChild(host);
     this._inner = card;
     this._host = host;
     this._deleteBtn = null;
     this._frame = undefined;
     this._frameUrls = new Map(); // frame_id -> photo URL, to know which photo is on screen
+    this._framePos = new Map(); // frame_id -> [index, count] of that photo in the album
     this._observer?.disconnect();
     this._observer = null;
     this._syncOverlay();
     this._syncDelete();
   }
 
+  /** Frame id of the photo the inner card shows, null before it shows one (undefined if unknown). */
+  _displayedFrame() {
+    const img = this._inner?.shadowRoot?.querySelector("img.layer.show");
+    if (!img) return null;
+    const match = img.getAttribute("src")?.match(/[?&]_?frame=(\d+)/);
+    return match ? Number(match[1]) : undefined;
+  }
+
   /** URL of the photo the inner card is showing right now (it swaps only after loading and fading). */
   _displayedUrl() {
-    const img = this._inner?.shadowRoot?.querySelector("img.layer.show");
-    const match = img?.getAttribute("src")?.match(/[?&]_?frame=(\d+)/);
-    if (match && this._frameUrls.has(Number(match[1]))) return this._frameUrls.get(Number(match[1]));
-    return img ? null : this._hass?.states[this._config.entity]?.attributes?.current_url;
+    const frame = this._displayedFrame();
+    if (frame != null && this._frameUrls.has(frame)) return this._frameUrls.get(frame);
+    return frame === null ? this._hass?.states[this._config.entity]?.attributes?.current_url : null;
+  }
+
+  /** "3 / 23": which photo of the album is on screen. */
+  _renderPos() {
+    if (!this._pos) return;
+    const frame = this._displayedFrame();
+    const attrs = this._hass?.states[this._config.entity]?.attributes || {};
+    const pos = frame != null ? this._framePos.get(frame)
+      : frame === null ? [attrs.current_index, attrs.media_count] : null;
+    const [index, count] = pos || [];
+    this._pos.textContent = this._config.show_count && Number.isInteger(index) && count > 0
+      ? `${Math.min(index + 1, count)} / ${count}` : "";
   }
 
   /** Follow the inner card's picture swaps, so the year and the spinner change with the picture. */
@@ -459,6 +537,7 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
       this._host.classList.remove("ppl-loading");
       clearTimeout(this._spinnerTimeout);
       this._renderYear(url);
+      this._renderPos();
       this._favBtn?.refresh();
     });
     this._observer.observe(root, { subtree: true, attributes: true, attributeFilter: ["class", "src"] });
@@ -527,8 +606,15 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
       this._frameUrls.set(Number(attrs.frame_id), attrs.current_url);
       while (this._frameUrls.size > 40) this._frameUrls.delete(this._frameUrls.keys().next().value);
     }
+    if (attrs.frame_id != null) {
+      this._framePos.set(Number(attrs.frame_id), [attrs.current_index, attrs.media_count]);
+      while (this._framePos.size > 40) this._framePos.delete(this._framePos.keys().next().value);
+    }
     this._observeInner();
-    if (attrs.frame_id === this._frame) return;
+    if (attrs.frame_id === this._frame) {
+      this._renderPos(); // the album can shrink under the same photo (a photo was deleted)
+      return;
+    }
     const first = this._frame === undefined;
     this._frame = attrs.frame_id;
     // The observer updates the year when the picture really changes; this is the fallback.
@@ -537,6 +623,7 @@ class PhotoPrismLibrarySlideshow extends HTMLElement {
       this._host.classList.remove("ppl-loading");
       clearTimeout(this._spinnerTimeout);
       this._renderYear(this._displayedUrl() ?? attrs.current_url);
+      this._renderPos();
       this._favBtn?.refresh();
     }, first ? 0 : Number(this._config.duration ?? 600) + 1500);
   }
@@ -692,6 +779,15 @@ class PhotoPrismLibraryViewer extends HTMLElement {
         if (btn && tools === this._tools) tools.insertBefore(btn, this._favBtn || this._deleteBtn || null);
       });
     }
+    // ▦ opens the folder this viewer browses as a grid
+    if (this._config.folder && !this._config.items && this._config.album_button !== false && !this._albumPending) {
+      const tools = this._tools;
+      this._albumPending = albumButton(this._hass, this._config.folder, this._config.language).then((btn) => {
+        // Next to 🔍, before the heart and the trash can
+        const before = [this._favBtn, this._deleteBtn].find((b) => b?.parentNode === tools) || null;
+        if (btn && tools === this._tools) tools.insertBefore(btn, before);
+      });
+    }
   }
 
   get _t() {
@@ -724,6 +820,7 @@ class PhotoPrismLibraryViewer extends HTMLElement {
     this._favBtn?.dispose();
     this._favBtn = null;
     this._simPending = null;
+    this._albumPending = null;
     this._tools = toolbar();
     host.append(this._tools);
     host.append(this._button("ppl-nav prev", PREV_ICON, this._t.previous, () => this._step(-1)));
@@ -1136,6 +1233,11 @@ Object.assign(TEXT.en, {
   searching: "Looking for similar photos…",
   similarFailed: (err) => `Could not search: ${err}`,
   sourceGone: "This photo was deleted",
+  album: "Album",
+  sortAlbum: "Album order",
+  albumEmpty: "This album is empty.",
+  pickAlbum: "Open an album with the ▦ button on a slideshow or viewer to see it here.",
+  albumFailed: (err) => `Could not load the album: ${err}`,
 });
 Object.assign(TEXT.pl, {
   similarTitle: "Podobne zdjęcia",
@@ -1150,6 +1252,11 @@ Object.assign(TEXT.pl, {
   searching: "Szukam podobnych zdjęć…",
   similarFailed: (err) => `Nie udało się wyszukać: ${err}`,
   sourceGone: "To zdjęcie zostało usunięte",
+  album: "Album",
+  sortAlbum: "Kolejność albumu",
+  albumEmpty: "Ten album jest pusty.",
+  pickAlbum: "Otwórz album przyciskiem ▦ na pokazie slajdów albo w przeglądarce zdjęć, żeby zobaczyć go tutaj.",
+  albumFailed: (err) => `Nie udało się wczytać albumu: ${err}`,
 });
 
 const SIMILAR_CSS = `
@@ -1184,6 +1291,7 @@ const dateKey = (path) => {
   return d ? `${d.year}${d.month}${d.day}` : null;
 };
 const queryPhoto = () => new URLSearchParams(window.location.search).get("photo") || "";
+const queryFolder = () => new URLSearchParams(window.location.search).get("folder") || "";
 
 /**
  * `custom:photoprism-library-grid`: a grid of photos with a full-screen viewer and a
@@ -1191,6 +1299,9 @@ const queryPhoto = () => new URLSearchParams(window.location.search).get("photo"
  *   source: favorites  the favourites (newest hearts first)
  *   source: similar    photos like the one in the page URL (?photo=...), with a slider
  *                      for how similar they must be
+ *   source: folder     a library folder (with its subfolders) or album: `folder: "@on_this_day"`,
+ *                      or the one in the page URL (?folder=...), which the ▦ button on the
+ *                      slideshow and viewer cards opens
  */
 class PhotoPrismLibraryGrid extends HTMLElement {
   setConfig(config) {
@@ -1199,16 +1310,20 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       ...config,
     };
     this._similar = this._config.source === "similar";
+    this._folderMode = this._config.source === "folder";
+    this._folder = null; // folder: the one shown
+    this._albumTitle = "";
     this._selected = new Set();
     this._selecting = false;
     this._urls = new Map(); // path -> signed thumbnail URL
     this._signedAt = 0;
-    this._results = []; // similar: [{path, score}]
+    this._results = []; // similar: [{path, score}], folder: [{path}]
     this._total = 0;
     this._photo = null;
     this._status = null; // similar: message instead of results
     const sort = localStorage.getItem(this._sortKey);
-    this._sort = SORTS.includes(sort) ? sort : "added";
+    // An album such as "On this day" reads best by year
+    this._sort = SORTS.includes(sort) ? sort : this._folderMode ? "year" : "added";
     const saved = Number(localStorage.getItem("ppl-similarity"));
     this._threshold = saved >= this._config.min_similarity && saved <= this._config.max_similarity
       ? saved : Number(this._config.similarity);
@@ -1217,7 +1332,7 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   }
 
   get _sortKey() {
-    return `ppl-grid-sort-${this._config.source}`;
+    return `ppl-grid-sort-${this._config.source}`; // one sort for all albums
   }
 
   get _t() {
@@ -1233,11 +1348,13 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   connectedCallback() {
     this._onFavorites ||= () => {
       if (this._deleting) return; // redrawn when the deleting is done
-      if (this._similar) this._syncSelection();
+      if (this._similar || this._folderMode) this._syncSelection();
       else this._refresh();
     };
     this._onLocation ||= () => {
-      if (this._similar && this._built && queryPhoto() !== this._photo) this._refresh();
+      if (!this._built) return;
+      if (this._similar && queryPhoto() !== this._photo) this._refresh();
+      if (this._folderMode && !this._config.folder && queryFolder() !== this._folder) this._refresh();
     };
     window.addEventListener(FAVORITES_EVENT, this._onFavorites);
     window.addEventListener("location-changed", this._onLocation);
@@ -1254,7 +1371,11 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   _build() {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     const t = this._t;
-    const sortLabel = (s) => (s === "added" && this._similar ? t.sortScore : t[`sort${s[0].toUpperCase()}${s.slice(1)}`]);
+    const sortLabel = (s) => {
+      if (s === "added" && this._similar) return t.sortScore;
+      if (s === "added" && this._folderMode) return t.sortAlbum;
+      return t[`sort${s[0].toUpperCase()}${s.slice(1)}`];
+    };
     const { min_similarity: lo, max_similarity: hi } = this._config;
     this.shadowRoot.innerHTML = `<style>${BUTTON_CSS}${GRID_CSS}${SIMILAR_CSS}</style>
       <ha-card style="--ppl-tile:${Number(this._config.tile_size) || 140}px">
@@ -1329,10 +1450,13 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     this._refresh();
   }
 
-  /** The grid's items before sorting: favourites by recency, similar ones by score. */
+  /** The grid's items before sorting: favourites by recency, similar ones by score, an album in its order. */
   _baseItems() {
     if (this._similar) {
       return this._results.map((r, i) => ({ ...mediaItem(r.path), score: r.score, added: -i, date: dateKey(r.path) }));
+    }
+    if (this._folderMode) {
+      return this._results.map((r, i) => ({ ...mediaItem(r.path), added: -i, date: dateKey(r.path) }));
     }
     return favorites.items.map((i) => ({ ...mediaItem(i.path), added: i.added, date: dateKey(i.path) }));
   }
@@ -1358,6 +1482,10 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     if (!this._built) return;
     if (this._similar) {
       await this._search();
+      return;
+    }
+    if (this._folderMode) {
+      await this._loadFolder();
       return;
     }
     if (!favorites.loaded) {
@@ -1411,6 +1539,71 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     this._render();
   }
 
+  /** Folder: (re)load the album's photos (the one in the config, or in the page URL). */
+  async _loadFolder() {
+    const t = this._t;
+    const folder = String(this._config.folder || queryFolder()).replace(/^\/+|\/+$/g, "");
+    const token = (this._searchToken = (this._searchToken || 0) + 1);
+    if (folder !== this._folder) {
+      this._folder = folder;
+      this._albumTitle = "";
+      this._selected.clear();
+      this._results = [];
+    }
+    if (!folder) {
+      this._status = t.pickAlbum;
+      this._render();
+      return;
+    }
+    if (!this._results.length) {
+      this._status = t.loading;
+      this._render();
+    }
+    try {
+      const paths = await this._browseAll(folder, token);
+      if (paths === null) return; // another album was opened meanwhile
+      this._results = paths.map((path) => ({ path }));
+      this._status = this._results.length ? null : t.albumEmpty;
+      const keep = new Set(this._results.map((r) => r.path));
+      this._selected = new Set([...this._selected].filter((p) => keep.has(p)));
+      await this._sign(this._results.map((r) => r.path));
+    } catch (err) {
+      if (token !== this._searchToken) return;
+      this._results = [];
+      this._status = t.albumFailed(err?.message || err?.code || err);
+    }
+    this._render();
+  }
+
+  /**
+   * Every photo and video of a folder and its subfolders, the way Album Slideshow plays it
+   * (at most 8 levels deep and 5000 items). Null when another album was opened meanwhile.
+   */
+  async _browseAll(folder, token) {
+    const paths = [];
+    let level = [folder];
+    for (let depth = 0; level.length && depth <= 8 && paths.length < 5000; depth++) {
+      const next = [];
+      for (let i = 0; i < level.length; i += 8) {
+        const results = await Promise.all(
+          level.slice(i, i + 8).map((f) =>
+            this._hass.callWS({ type: "media_source/browse_media", media_content_id: `${SOURCE}/${f}` })),
+        );
+        if (token !== this._searchToken) return null;
+        if (depth === 0) this._albumTitle = results[0].title || folder;
+        for (const res of results) {
+          for (const c of res.children || []) {
+            const path = c.media_content_id.slice(SOURCE.length + 1);
+            if (c.media_class === "image" || c.media_class === "video") paths.push(path);
+            else if (c.can_expand && !path.startsWith("@")) next.push(path);
+          }
+        }
+      }
+      level = next;
+    }
+    return paths.slice(0, 5000);
+  }
+
   async _renderSource() {
     if (!this._sourceEl) return;
     const photo = this._photo;
@@ -1423,7 +1616,7 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     this._sourceEl.classList.remove("deleted");
     this._sourceEl.innerHTML =
       `<div class="tile src ppl-host"><img alt=""><span class="check">${CHECK_ICON}</span></div>` +
-      `<div class="meta">${date ? `<b>${date.day}.${date.month}.${date.year}</b>` : ""}${name}</div>`;
+      `<div class="meta">${date ? `<b>${date.day}.${date.month}.${date.year}</b>` : ""}${esc(name)}</div>`;
     const tile = this._sourceEl.querySelector(".tile");
     tile.dataset.path = photo;
     const img = tile.querySelector("img");
@@ -1479,15 +1672,17 @@ class PhotoPrismLibraryGrid extends HTMLElement {
   _render() {
     const t = this._t;
     const items = this._ordered();
-    const title = this._config.title || (this._similar ? t.similarTitle : t.favorites);
-    this._title.innerHTML = `${title}<small>${items.length || ""}</small>`;
+    const title = this._config.title
+      || (this._similar ? t.similarTitle : this._folderMode ? this._albumTitle || t.album : t.favorites);
+    this._title.innerHTML = `${esc(title)}<small>${items.length || ""}</small>`;
     this._card.classList.toggle("selecting", this._selecting);
     if (this._similar && this._found) {
       this._found.textContent = this._results.length < this._total
         ? t.shownOf(this._results.length, this._total) : this._total ? t.found(this._total) : "";
     }
     if (!items.length) {
-      this._body.innerHTML = `<div class="empty">${this._status || (this._similar ? t.noSimilar : t.noFavorites)}</div>`;
+      const empty = this._similar ? t.noSimilar : this._folderMode ? t.albumEmpty : t.noFavorites;
+      this._body.innerHTML = `<div class="empty">${esc(this._status || empty)}</div>`;
       if (!this._deleting) this._setSelecting(false);
       this._syncSelection();
       return;
@@ -1564,9 +1759,9 @@ class PhotoPrismLibraryGrid extends HTMLElement {
 
   /** A photo was deleted in the full-screen viewer. */
   _forget(path) {
-    if (!this._similar) return; // favourites update by themselves
+    if (!this._similar && !this._folderMode) return; // favourites update by themselves
     this._results = this._results.filter((r) => r.path !== path);
-    this._total = Math.max(0, this._total - 1);
+    if (this._similar) this._total = Math.max(0, this._total - 1);
     this._render();
   }
 
@@ -1674,10 +1869,10 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     bar.style.width = "0";
     notify(this, stopped ? t.stopped(deleted.length)
       : failed.length ? t.deletedSome(deleted.length, failed.length) : t.deletedMany(deleted.length));
-    if (this._similar && deleted.length) {
+    if ((this._similar || this._folderMode) && deleted.length) {
       const gone = new Set(deleted);
       this._results = this._results.filter((r) => !gone.has(r.path));
-      this._total = Math.max(0, this._total - deleted.length);
+      if (this._similar) this._total = Math.max(0, this._total - deleted.length);
     }
     // Failed (or not yet deleted) photos stay selected to try again
     this._selected = new Set(paths.filter((p) => !deleted.includes(p)));
@@ -1704,7 +1899,7 @@ if (!customElements.get("photoprism-library-grid")) {
   window.customCards.push({
     type: "photoprism-library-grid",
     name: "PhotoPrism Library grid",
-    description: "Favourites or similar photos as a grid: sorting, full-screen viewer, select several to delete or (un)heart.",
+    description: "Favourites, similar photos or an album as a grid: sorting, full-screen viewer, select several to delete or (un)heart.",
     preview: false,
   });
 }

@@ -13,6 +13,7 @@ from homeassistant.helpers.start import async_at_started
 
 from . import slideshow, websocket
 from .const import (
+    CONF_ALBUM_VIEW,
     CONF_ALLOW_DELETE,
     CONF_EXTRA_FOLDERS,
     CONF_FOLDER,
@@ -42,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
 PLATFORMS = [Platform.SENSOR]
 STATIC_URL = "/photoprism_library_static"
-VERSION = "1.4.2"
+VERSION = "1.5.0"
 
 
 def _register_heif_opener() -> None:
@@ -98,6 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     url = (options.get(CONF_SIMILARITY_URL) or "").strip()
     lib.similarity = SimilarityClient(hass, url, options.get(CONF_SIMILARITY_TOKEN)) if url else None
     lib.similar_view = (options.get(CONF_SIMILAR_VIEW) or "").strip()
+    lib.album_view = (options.get(CONF_ALBUM_VIEW) or "").strip()
     hass.data[DOMAIN] = lib
     await async_get_favorites(hass)
 
