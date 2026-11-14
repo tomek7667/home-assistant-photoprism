@@ -49,6 +49,19 @@ class ImageView(_PhotoView):
         return web.FileResponse(real, headers=_CACHE_HEADERS)
 
 
+class VideoView(_PhotoView):
+    """A video every browser can play: the original if it is H.264, otherwise an H.264 copy."""
+
+    url = "/api/photoprism_library/video/{path:.+}"
+    name = "api:photoprism_library:video"
+
+    async def get(self, request: web.Request, path: str) -> web.StreamResponse:
+        lib, real = await self._resolve(request, path)
+        if ext_of(path) not in VIDEO_EXTS or lib.videos is None:
+            raise web.HTTPNotFound
+        return await lib.videos.async_response(request, real)
+
+
 class ThumbView(_PhotoView):
     url = "/api/photoprism_library/thumb/{path:.+}"
     name = "api:photoprism_library:thumb"

@@ -8,6 +8,7 @@ Built for PhotoPrism's `originals` folder, but it works with any folder of photo
 
 - **HEIC/HEIF support.** HEIC photos are converted to JPEG on the fly, so they display in every browser, not only Safari. Pillow can then open HEIC anywhere in Home Assistant, which also helps other image integrations.
 - **Thumbnails** in the media browser grid for every photo.
+- **iPhone videos in every browser.** Safari plays HEVC (H.265) videos, but Chrome, Edge and Firefox usually only with a hardware decoder they support (most Linux PCs have none): they play the sound over a black picture. The cards notice this and play an H.264 copy instead, made with ffmpeg (max 1280 px, 30 fps) and kept in Home Assistant's cache folder, which is not backed up. Copies are made in the background at the lowest CPU priority a few minutes after start and every 6 hours; a video opened before its copy exists is converted while it plays. On a Raspberry Pi 5, 1080p converts faster than real time, 4K at about a third of it.
 - **On this day.** Photos taken on today's date in earlier years. The date comes from `YYYY/MM/DD` folders or from names like `20230512_143000_ABCD.jpg`, `IMG_20230512_…`, `PXL_20230512…` or `2023-05-12 …`.
 - **Random.** A random selection from the whole library (500 by default), refreshed every 6 hours.
 - **Live Photos shown once.** The short video that belongs to a Live Photo (`IMG_1234.MOV` or iCloud's `IMG_1234_HEVC.MOV`) is hidden.
@@ -200,6 +201,7 @@ The view shows the photo on top, the results most similar first with their simil
 | `media-source://photoprism_library/<path>` | Browse folders and photos |
 | `/api/photoprism_library/image/<path>` | The photo: HEIC as JPEG (max 2560 px), anything else unchanged |
 | `/api/photoprism_library/thumb/<path>` | 360 px JPEG thumbnail (a frame for videos) |
+| `/api/photoprism_library/video/<path>` | A video every browser plays: the original if it is H.264, otherwise the H.264 copy (streamed while it is made) |
 | `media-source://photoprism_library/@favorites` | The favourites, most recently added first |
 | WebSocket `photoprism_library/favorites/subscribe`, `…/favorites/set` | Read and change the favourites |
 | WebSocket `photoprism_library/sign` | Signed thumbnail URLs for many photos at once |
@@ -207,7 +209,7 @@ The view shows the photo on top, the results most similar first with their simil
 | WebSocket `photoprism_library/similar` | Similar photos (via the similar-photo service) |
 | WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Any logged-in user, when deleting is enabled |
 
-Both HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two conversions run at once, so small hosts like a Raspberry Pi stay responsive.
+All HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two conversions run at once, so small hosts like a Raspberry Pi stay responsive.
 
 ## Notes
 

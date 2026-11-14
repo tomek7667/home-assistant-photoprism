@@ -100,6 +100,7 @@ class PhotoLibrary:
         self.similarity = None  # SimilarityClient when the similar-photo service is configured
         self.similar_view = ""  # dashboard view that shows similar photos (?photo=<path>)
         self.album_view = ""  # dashboard view that shows an album as a grid (?folder=<folder>)
+        self.videos = None  # VideoCache: H.264 copies for browsers that can't play HEVC
         self._thumbs: _LRU = _LRU(4000)  # ~20 kB each
         self._fulls: _LRU = _LRU(20)
         self._decode = asyncio.Semaphore(2)  # keep small hosts responsive while converting
@@ -185,6 +186,25 @@ class PhotoLibrary:
                 rel = name if rel_dir == "." else f"{rel_dir}/{name}"
                 photos.append(Photo(rel, photo_date(rel)))
         return photos
+
+    def video_files(self) -> list[str]:
+        """Real paths of the library's videos, Live Photo motion parts left out (as in list_dir)."""
+        videos: list[str] = []
+        seen: set[str] = set()
+        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=True):
+            dirnames[:] = [d for d in dirnames if not d.startswith((".", "@", "#"))]
+            if not self._inside(os.path.realpath(dirpath)):
+                dirnames[:] = []
+                continue
+            photo_stems = {photo_stem(f) for f in filenames if ext_of(f) in PHOTO_EXTS}
+            for name in filenames:
+                if name.startswith(".") or ext_of(name) not in VIDEO_EXTS or photo_stem(name) in photo_stems:
+                    continue
+                real = os.path.realpath(os.path.join(dirpath, name))
+                if real not in seen and self._inside(real):
+                    seen.add(real)
+                    videos.append(real)
+        return videos
 
     def _inside(self, real: str) -> bool:
         return any(real == r or real.startswith(r + os.sep) for r in self._real_roots)

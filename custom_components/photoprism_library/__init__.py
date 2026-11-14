@@ -1,6 +1,7 @@
 """PhotoPrism Library: browse your photo folder in Home Assistant, HEIC included."""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
 from . import slideshow, websocket
@@ -37,13 +39,17 @@ from .favorites import async_get_favorites
 from .library import PhotoLibrary
 from .photoprism import PhotoPrismClient
 from .similarity import SimilarityClient
-from .views import ImageView, ThumbView
+from .video import VideoCache
+from .views import ImageView, ThumbView, VideoView
 
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = f"{DOMAIN}_registered"
 PLATFORMS = [Platform.SENSOR]
 STATIC_URL = "/photoprism_library_static"
-VERSION = "1.5.0"
+VERSION = "1.6.0"
+# Videos browsers can't play get H.264 copies in the background: first run a while after start, then every 6 hours
+VIDEO_FIRST_RUN = 300
+VIDEO_INTERVAL = timedelta(hours=6)
 
 
 def _register_heif_opener() -> None:
@@ -100,12 +106,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     lib.similarity = SimilarityClient(hass, url, options.get(CONF_SIMILARITY_TOKEN)) if url else None
     lib.similar_view = (options.get(CONF_SIMILAR_VIEW) or "").strip()
     lib.album_view = (options.get(CONF_ALBUM_VIEW) or "").strip()
+    lib.videos = VideoCache(hass, lib)
     hass.data[DOMAIN] = lib
     await async_get_favorites(hass)
 
     if not hass.data.get(_REGISTERED):  # routes and commands can't be removed; register once
         hass.http.register_view(ImageView(hass))
         hass.http.register_view(ThumbView(hass))
+        hass.http.register_view(VideoView(hass))
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "www"), False)]
         )
@@ -124,6 +132,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await slideshow.async_refresh(hass)
 
     entry.async_on_unload(async_at_started(hass, _refresh_slideshows))
+
+    # H.264 copies of videos that browsers without HEVC can't play
+    async def _convert_videos(_now=None) -> None:
+        entry.async_create_background_task(hass, lib.videos.async_convert_all(), f"{DOMAIN} video copies")
+
+    entry.async_on_unload(async_call_later(hass, VIDEO_FIRST_RUN, _convert_videos))
+    entry.async_on_unload(async_track_time_interval(hass, _convert_videos, VIDEO_INTERVAL))
+    entry.async_on_unload(lib.videos.stop)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

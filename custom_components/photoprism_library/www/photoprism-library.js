@@ -17,7 +17,22 @@
  * Every photo shows a heart (favourites are kept in Home Assistant, one list for
  * everyone) next to the delete button.
  */
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
+const VIDEO_URL = "/api/photoprism_library/video/";
+// Safari plays iPhone (HEVC) videos; Chrome, Edge and Firefox mostly only with a hardware decoder
+// they support, and otherwise play the sound over a black picture. They get an H.264 copy instead.
+const HEVC_OK = (() => {
+  try {
+    const v = document.createElement("video");
+    return Boolean(v.canPlayType('video/mp4; codecs="hvc1.1.6.L153.B0"') || v.canPlayType('video/mp4; codecs="hev1.1.6.L153.B0"'));
+  } catch {
+    return true;
+  }
+})();
+const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
+/** Signed URL of a video every browser can play (the original if it is H.264, else an H.264 copy). */
+const compatibleVideoUrl = (hass, path) =>
+  hass.callWS({ type: "auth/sign_path", path: `${VIDEO_URL}${encodePath(path)}`, expires: 6 * 3600 }).then((r) => r.path);
 const PHOTO_URL = /\/api\/photoprism_library\/(?:image|thumb)\/([^?#]+)/;
 const PATH_DATE = /(?:^|\/)((?:19|20)\d{2})\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])(?:\/|$)/;
 const NAME_DATE = /(?<!\d)((?:19|20)\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])(?!\d)/;
@@ -941,6 +956,10 @@ class PhotoPrismLibraryViewer extends HTMLElement {
   _preload(item) {
     if (item.ready && Date.now() - item.readyAt > 5 * 3600 * 1000) item.ready = item.url = null; // signed URL ages out
     if (!item.ready) item.readyAt = Date.now();
+    if (!item.ready && item.kind === "video" && (!HEVC_OK || item.compatible)) {
+      item.compatible = true;
+      item.ready = compatibleVideoUrl(this._hass, item.path); // the browser streams it when shown
+    }
     item.ready ||= this._hass
       .callWS({ type: "media_source/resolve_media", media_content_id: item.id, expires: 6 * 3600 })
       .then((res) =>
@@ -1009,8 +1028,22 @@ class PhotoPrismLibraryViewer extends HTMLElement {
       this._layers.forEach((l) => l.classList.remove("show"));
       this._bg.classList.remove("show");
       this._host.classList.add("is-video");
-      this._video.src = url;
-      this._video.play?.().catch(() => {}); // may need a tap where autoplay is blocked
+      const video = this._video;
+      // Sound but no picture: the browser can't decode this video, so switch to the H.264 copy
+      video.onloadedmetadata = () => {
+        if (video.videoWidth || item.compatible || this._shown !== item) return;
+        item.compatible = true;
+        item.ready = null;
+        this._preload(item)
+          .then((u) => {
+            if (this._shown !== item) return;
+            video.src = u;
+            video.play?.().catch(() => {});
+          })
+          .catch(() => {});
+      };
+      video.src = url;
+      video.play?.().catch(() => {}); // may need a tap where autoplay is blocked
     } else {
       this._stopVideo();
       const next = this._layers[1 - this._front];
