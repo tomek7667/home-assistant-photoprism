@@ -9,8 +9,10 @@ For those browsers the cards ask for /api/photoprism_library/video/<path> instea
   in Home Assistant's cache folder (not part of backups). The first viewer gets the copy while it
   is being made; later viewers get the finished file, with seeking. A conversion nobody watches
   any more is stopped (the background pass makes that copy later).
-* Videos still waiting for a copy are converted in the background, one at a time at the lowest
-  CPU priority, a few minutes after start and then every 6 hours; copies of removed videos are dropped.
+* Favourite videos and those from the last 90 days are converted ahead of time in the background,
+  one at a time at the lowest CPU priority, a few minutes after start and then every 6 hours.
+  Converting a whole library would keep a small host busy for days; older videos are converted
+  when first opened. Copies of removed or changed videos are dropped.
 
 A 4K HEVC video converts at roughly a third of real time on a Raspberry Pi 5 (software decoding
 dominates), 1080p a little faster than real time.
@@ -20,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 import hashlib
 import json
 import logging
@@ -32,6 +35,8 @@ from aiohttp import web
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .favorites import async_get_favorites
+from .library import photo_date
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +48,7 @@ ON_DEMAND_LIMIT = 2  # conversions started by viewers at the same time
 ABANDON_AFTER = 10  # s without a viewer before an on-demand conversion is stopped
 CHUNK = 256 * 1024
 ORPHAN_AGE = 3600  # leave just-written copies alone when pruning
+RECENT_DAYS = 90  # videos this recent (and favourites) are converted ahead of time
 _CACHED = {"Cache-Control": "private, max-age=86400"}
 
 
@@ -310,30 +316,40 @@ class VideoCache:
         finally:
             self._converting = False
 
-    async def _convert_all(self) -> None:
-        videos = await self.hass.async_add_executor_job(self.lib.video_files)
+    def _plan(self, favorites: set[str]) -> tuple[set[str], list[tuple[tuple[str, int, int], str]]]:
+        """Copy names of every existing video (kept when pruning), and the videos to convert ahead:
+        favourites first, then the last RECENT_DAYS days, newest first. The rest is converted when opened."""
+        cutoff = date.today() - timedelta(days=RECENT_DAYS)
         wanted: set[str] = set()
-        todo: list[tuple[str, str, int]] = []
-        for path in videos:
+        ahead: list[tuple[tuple[int, int], tuple[str, int, int], str]] = []
+        for rel, real in self.lib.video_files():
             try:
-                ident = await self.hass.async_add_executor_job(self._identity, path)
+                ident = self._identity(real)
             except OSError:
                 continue
-            codec, side = await self._probe(ident)
             final = self._cache_name(ident)
-            if codec is None:  # unreadable right now: keep any copy it has
-                wanted.add(os.path.basename(final))
-                continue
-            if codec in PLAYABLE_CODECS:
-                continue
             wanted.add(os.path.basename(final))
-            todo.append((ident[0], final, side))
+            taken = photo_date(rel)
+            day = date(*taken) if taken else date.fromtimestamp(ident[1] / 1e9)
+            if rel in favorites:
+                ahead.append(((0, -day.toordinal()), ident, final))
+            elif day >= cutoff:
+                ahead.append(((1, -day.toordinal()), ident, final))
+        ahead.sort(key=lambda item: item[0])
+        return wanted, [(ident, final) for _, ident, final in ahead]
+
+    async def _convert_all(self) -> None:
+        favorites = {item["path"] for item in (await async_get_favorites(self.hass)).items()}
+        wanted, ahead = await self.hass.async_add_executor_job(self._plan, favorites)
         removed = await self.hass.async_add_executor_job(self._prune, wanted)
         made = 0
-        for real, final, side in todo:
+        for ident, final in ahead:
             if await self.hass.async_add_executor_job(os.path.isfile, final):
                 continue
-            job = self._start(real, final, side > BIG_SIDE, background=True)
+            codec, side = await self._probe(ident)
+            if codec is None or codec in PLAYABLE_CODECS:
+                continue
+            job = self._start(ident[0], final, side > BIG_SIDE, background=True)
             if job is None:  # stopped
                 return
             await job.done.wait()

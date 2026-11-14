@@ -187,9 +187,9 @@ class PhotoLibrary:
                 photos.append(Photo(rel, photo_date(rel)))
         return photos
 
-    def video_files(self) -> list[str]:
-        """Real paths of the library's videos, Live Photo motion parts left out (as in list_dir)."""
-        videos: list[str] = []
+    def video_files(self) -> list[tuple[str, str]]:
+        """(library-relative path, real path) of the library's videos, Live Photo motion parts left out (as in list_dir)."""
+        videos: list[tuple[str, str]] = []
         seen: set[str] = set()
         for dirpath, dirnames, filenames in os.walk(self.root, followlinks=True):
             dirnames[:] = [d for d in dirnames if not d.startswith((".", "@", "#"))]
@@ -203,7 +203,8 @@ class PhotoLibrary:
                 real = os.path.realpath(os.path.join(dirpath, name))
                 if real not in seen and self._inside(real):
                     seen.add(real)
-                    videos.append(real)
+                    rel_dir = os.path.relpath(dirpath, self.root)
+                    videos.append((name if rel_dir == "." else f"{rel_dir}/{name}", real))
         return videos
 
     def _inside(self, real: str) -> bool:
