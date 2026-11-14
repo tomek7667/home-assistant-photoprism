@@ -889,12 +889,23 @@ class PhotoPrismLibraryViewer extends HTMLElement {
     };
     window.addEventListener("keydown", this._onKey);
     this._restartAutoplay();
+    if (this._config && this._hass && this._tools) this._addFavorite();
+    if (this._resumeVideo) {
+      // Back on screen (dashboards keep cards between views): show the video again
+      this._resumeVideo = false;
+      if (this._items?.length) this._show(this._index);
+    }
   }
 
   disconnectedCallback() {
     window.removeEventListener("keydown", this._onKey);
     clearInterval(this._autoplay);
-    this._video?.pause();
+    // Let go of the video, so the server stops a conversion nobody watches any more
+    this._resumeVideo = this._shown?.kind === "video" && Boolean(this._video?.getAttribute("src"));
+    this._stopVideo();
+    this._favBtn?.dispose();
+    this._favBtn?.remove();
+    this._favBtn = null;
   }
 
   _restartAutoplay() {

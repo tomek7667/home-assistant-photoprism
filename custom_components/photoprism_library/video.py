@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
 import uuid
 
@@ -103,6 +104,7 @@ class _Job:
     viewers: int = 0
     task: asyncio.Task | None = None
     abandoned: bool = False
+    abandon_timer: asyncio.TimerHandle | None = None
 
 
 class VideoCache:
@@ -111,9 +113,10 @@ class VideoCache:
     def __init__(self, hass: HomeAssistant, lib) -> None:
         self.hass = hass
         self.lib = lib
-        # Config.cache_path (not part of backups) exists since Home Assistant 2026.3
+        # Config.cache_path (left out of backups) exists since Home Assistant 2026.3; older versions
+        # back up everything under /config, so the copies go to the temporary folder there.
         cache_path = getattr(hass.config, "cache_path", None)
-        self.dir = cache_path(DOMAIN, "video") if cache_path else hass.config.path(".cache", DOMAIN, "video")
+        self.dir = cache_path(DOMAIN, "video") if cache_path else os.path.join(tempfile.gettempdir(), DOMAIN, "video")
         self._probes: dict[tuple[str, int, int], tuple[str, int]] = {}
         self._jobs: dict[str, _Job] = {}
         self._on_demand = asyncio.Semaphore(ON_DEMAND_LIMIT)
@@ -168,10 +171,12 @@ class VideoCache:
         if job is not None and not job.abandoned:
             if background:
                 job.keep = True
-            elif job.background and job.pid:
-                # Someone is watching now: the background conversion gets normal priority
-                self.hass.async_add_executor_job(_renice, job.pid, 0)
             return job
+        if not background:
+            # A viewer moved on to this video: conversions nobody watches give way at once
+            for idle in list(self._jobs.values()):
+                if idle.viewers == 0 and not idle.keep:
+                    self._abandon(idle)
         # Unique temporary names: an abandoned or old conversion of the same copy may still be cleaning up
         job = _Job(
             final=final, tmp=f"{final}.{uuid.uuid4().hex}.part", background=background, keep=background
@@ -226,6 +231,22 @@ class VideoCache:
             with contextlib.suppress(Exception):
                 await self.hass.async_add_executor_job(_remove, job.tmp, remuxed)
 
+    def _abandon(self, job: _Job) -> None:
+        if job.abandon_timer is not None:
+            job.abandon_timer.cancel()
+            job.abandon_timer = None
+        if job.viewers == 0 and not job.keep and not job.done.is_set() and job.task is not None:
+            job.abandoned = True
+            job.task.cancel()
+
+    def _viewer_joined(self, job: _Job) -> None:
+        job.viewers += 1
+        if job.abandon_timer is not None:  # came back within the grace period
+            job.abandon_timer.cancel()
+            job.abandon_timer = None
+        if job.pid:  # someone is watching: normal priority (a background conversion runs at the lowest)
+            self.hass.async_add_executor_job(_renice, job.pid, 0)
+
     def _viewer_left(self, job: _Job) -> None:
         job.viewers -= 1
         if job.viewers > 0 or job.done.is_set():
@@ -234,13 +255,8 @@ class VideoCache:
             if job.pid:
                 self.hass.async_add_executor_job(_renice, job.pid, 19)
             return
-
-        def _abandon() -> None:  # a short grace period: browsers re-request, people swipe back
-            if job.viewers == 0 and not job.keep and not job.done.is_set() and job.task is not None:
-                job.abandoned = True
-                job.task.cancel()
-
-        self.hass.loop.call_later(ABANDON_AFTER, _abandon)
+        # A short grace period: browsers re-request, people swipe back
+        job.abandon_timer = self.hass.loop.call_later(ABANDON_AFTER, self._abandon, job)
 
     def stop(self) -> None:
         """Stop every conversion, running or waiting (config entry unloaded)."""
@@ -266,7 +282,7 @@ class VideoCache:
         job = self._start(ident[0], final, side > BIG_SIDE, background=False)
         if job is None:
             raise web.HTTPServiceUnavailable
-        job.viewers += 1
+        self._viewer_joined(job)
         try:
             return await self._stream(request, job)
         finally:
