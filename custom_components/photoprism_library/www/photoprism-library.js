@@ -810,6 +810,7 @@ class PhotoPrismLibraryViewer extends HTMLElement {
   }
 
   _render() {
+    if (this._video) this._stopVideo(); // the old player goes with the old markup: close its stream
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     const ratio = String(this._config.aspect_ratio || "16/9").replace(":", "/");
     const fill = !!this._config.fill;
@@ -891,17 +892,20 @@ class PhotoPrismLibraryViewer extends HTMLElement {
     this._restartAutoplay();
     if (this._config && this._hass && this._tools) this._addFavorite();
     if (this._resumeVideo) {
-      // Back on screen (dashboards keep cards between views): show the video again
+      // Back on screen (dashboards keep cards between views): show the photo or video again
       this._resumeVideo = false;
       if (this._items?.length) this._show(this._index);
+      else this._load();
     }
   }
 
   disconnectedCallback() {
     window.removeEventListener("keydown", this._onKey);
     clearInterval(this._autoplay);
-    // Let go of the video, so the server stops a conversion nobody watches any more
-    this._resumeVideo = this._shown?.kind === "video" && Boolean(this._video?.getAttribute("src"));
+    // Let go of the video, so the server stops a conversion nobody watches any more. Loads still
+    // under way are dropped (a late URL would start a video nobody can see or stop).
+    this._resumeVideo = Boolean(this._config && this._hass);
+    this._token = (this._token || 0) + 1;
     this._stopVideo();
     this._favBtn?.dispose();
     this._favBtn?.remove();
@@ -1047,7 +1051,7 @@ class PhotoPrismLibraryViewer extends HTMLElement {
         item.ready = null;
         this._preload(item)
           .then((u) => {
-            if (this._shown !== item) return;
+            if (this._shown !== item || !this.isConnected) return;
             video.src = u;
             video.play?.().catch(() => {});
           })

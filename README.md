@@ -209,7 +209,7 @@ The view shows the photo on top, the results most similar first with their simil
 | WebSocket `photoprism_library/similar` | Similar photos (via the similar-photo service) |
 | WebSocket `photoprism_library/delete_plan`, `photoprism_library/delete` | Any logged-in user, when deleting is enabled |
 
-All HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two conversions run at once, so small hosts like a Raspberry Pi stay responsive.
+All HTTP endpoints require a logged-in user or a signed URL. Converted images are cached in memory, and at most two image conversions run at once, so small hosts like a Raspberry Pi stay responsive. Video conversions run besides those: at most two for viewers (stopped when nobody watches any more) and one in the background at the lowest CPU priority.
 
 ## Notes
 

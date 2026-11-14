@@ -50,6 +50,7 @@ ABANDON_AFTER = 10  # s without a viewer before an on-demand conversion is stopp
 CHUNK = 256 * 1024
 ORPHAN_AGE = 3600  # leave just-written copies alone when pruning
 RECENT_DAYS = 90  # videos this recent (and favourites) are converted ahead of time
+PRUNE_MAX_UNREADABLE = 0.1  # more unreadable videos than this means the library is (partly) offline: don't prune
 _CACHED = {"Cache-Control": "private, max-age=86400"}
 
 
@@ -332,16 +333,22 @@ class VideoCache:
         finally:
             self._converting = False
 
-    def _plan(self, favorites: set[str]) -> tuple[set[str], list[tuple[tuple[str, int, int], str]]]:
+    def _plan(self, favorites: set[str]) -> tuple[set[str] | None, list[tuple[tuple[str, int, int], str]]]:
         """Copy names of every existing video (kept when pruning), and the videos to convert ahead:
-        favourites first, then the last RECENT_DAYS days, newest first. The rest is converted when opened."""
+        favourites first, then the last RECENT_DAYS days, newest first. The rest is converted when opened.
+
+        The names are None when the library looks unreachable (nothing found, or many files
+        unreadable, e.g. a disk not mounted yet): then nothing may be pruned."""
         cutoff = date.today() - timedelta(days=RECENT_DAYS)
         wanted: set[str] = set()
         ahead: list[tuple[tuple[int, int], tuple[str, int, int], str]] = []
-        for rel, real in self.lib.video_files():
+        videos = self.lib.video_files()
+        unreadable = 0
+        for rel, real in videos:
             try:
                 ident = self._identity(real)
             except OSError:
+                unreadable += 1
                 continue
             final = self._cache_name(ident)
             wanted.add(os.path.basename(final))
@@ -352,12 +359,17 @@ class VideoCache:
             elif day >= cutoff:
                 ahead.append(((1, -day.toordinal()), ident, final))
         ahead.sort(key=lambda item: item[0])
-        return wanted, [(ident, final) for _, ident, final in ahead]
+        reachable = bool(videos) and unreadable <= PRUNE_MAX_UNREADABLE * len(videos)
+        return (wanted if reachable else None), [(ident, final) for _, ident, final in ahead]
 
     async def _convert_all(self) -> None:
         favorites = {item["path"] for item in (await async_get_favorites(self.hass)).items()}
         wanted, ahead = await self.hass.async_add_executor_job(self._plan, favorites)
-        removed = await self.hass.async_add_executor_job(self._prune, wanted)
+        if wanted is None:
+            removed = 0
+            _LOGGER.debug("Library looks unreachable; not removing any video copies")
+        else:
+            removed = await self.hass.async_add_executor_job(self._prune, wanted)
         made = 0
         for ident, final in ahead:
             if await self.hass.async_add_executor_job(os.path.isfile, final):
