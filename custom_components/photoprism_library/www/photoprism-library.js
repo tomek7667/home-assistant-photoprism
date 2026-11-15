@@ -717,7 +717,8 @@ const VIEWER_CSS = `
     color: #fff; font-size: 13px; background: rgba(0, 0, 0, 0.45); pointer-events: none;
   }
   .ppl-count:empty { display: none; }
-  .ppl-close { top: 12px; left: 12px; width: 44px; height: 44px; opacity: 1; }
+  /* margin-top: the arrows' vertical-centring margin would lift the close button above the edge */
+  .ppl-close { top: 12px; left: 12px; width: 44px; height: 44px; margin-top: 0; opacity: 1; }
   .ppl-viewer.has-close .ppl-count { left: 66px; top: 22px; }
   .ppl-viewer.fill { height: 100%; }
   .ppl-empty {
@@ -1118,7 +1119,13 @@ const mediaItem = (path) => ({ id: `${SOURCE}/${path}`, path, kind: VIDEO_FILE.t
 /** Show items full screen, starting at index; the viewer card does the work. */
 function openLightbox(hass, items, index, lang, onDeleted) {
   const overlay = document.createElement("div");
-  overlay.style.cssText = "position:fixed;inset:0;z-index:10000;background:#000;";
+  // Keep the viewer inside the safe area: Home Assistant runs edge to edge (viewport-fit=cover),
+  // so on iPhones the top buttons would sit under the status bar / Dynamic Island (portrait)
+  // and the arrows under the island (landscape), where taps don't reach the page.
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:10000;background:#000;box-sizing:border-box;" +
+    "padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) " +
+    "env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);";
   const scroll = document.documentElement.style.overflow;
   document.documentElement.style.overflow = "hidden";
   const viewer = document.createElement("photoprism-library-viewer");
