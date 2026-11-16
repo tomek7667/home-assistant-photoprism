@@ -259,11 +259,18 @@ class PhotoLibrary:
         return removed
 
     def forget(self, plan: DeletePlan) -> None:
-        """Drop deleted photos from the index and caches."""
+        """Drop deleted photos from the index and caches.
+
+        Runs on the event loop, so it only compares strings: caches are keyed by the path safe_path()
+        returned, which is the library root joined with the library-relative name. Another library
+        path to the same deleted file can stay cached, but nothing serves it any more because
+        safe_path() refuses paths whose file is gone; the LRU drops it later.
+        """
         gone = {n.lower() for n in plan.library_names}
         self._index = [p for p in self._index if p.rel.lower() not in gone]
+        paths = {os.path.join(self.root, n) for n in plan.library_names} | set(plan.links) | set(plan.files)
         for cache in (self._thumbs, self._fulls):
-            for key in [k for k in cache if os.path.realpath(k[0]) in plan.files or k[0] in plan.links]:
+            for key in [k for k in cache if k[0] in paths]:
                 cache.pop(key, None)
 
     @staticmethod

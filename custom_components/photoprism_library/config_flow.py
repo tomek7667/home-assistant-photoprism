@@ -28,8 +28,6 @@ from .const import (
     DEFAULT_SKIP_SCREENSHOTS,
     DOMAIN,
     PHOTOPRISM_APP_PASSWORD,
-    PHOTOPRISM_INTEGRATION,
-    PHOTOPRISM_INTEGRATION_DOMAIN,
     PHOTOPRISM_NONE,
 )
 
@@ -46,6 +44,7 @@ def _check_folders(folder: str, extra: str) -> dict[str, str]:
 
 class PhotoPrismLibraryConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    MINOR_VERSION = 2
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -84,9 +83,6 @@ class PhotoPrismLibraryOptionsFlow(OptionsFlow):
         current = {**self.config_entry.data, **self.config_entry.options}
         if user_input is not None:
             mode = user_input.get(CONF_PHOTOPRISM, PHOTOPRISM_NONE)
-            if user_input.get(CONF_ALLOW_DELETE) and mode == PHOTOPRISM_INTEGRATION:
-                if not self.hass.config_entries.async_entries(PHOTOPRISM_INTEGRATION_DOMAIN):
-                    errors[CONF_PHOTOPRISM] = "photoprism_integration_missing"
             if user_input.get(CONF_ALLOW_DELETE) and mode == PHOTOPRISM_APP_PASSWORD:
                 if not user_input.get(CONF_PHOTOPRISM_URL) or not (
                     user_input.get(CONF_PHOTOPRISM_TOKEN) or current.get(CONF_PHOTOPRISM_TOKEN)
@@ -118,7 +114,7 @@ class PhotoPrismLibraryOptionsFlow(OptionsFlow):
                         CONF_PHOTOPRISM, default=current.get(CONF_PHOTOPRISM, PHOTOPRISM_NONE)
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
-                            options=[PHOTOPRISM_NONE, PHOTOPRISM_INTEGRATION, PHOTOPRISM_APP_PASSWORD],
+                            options=[PHOTOPRISM_NONE, PHOTOPRISM_APP_PASSWORD],
                             translation_key=CONF_PHOTOPRISM,
                             mode=selector.SelectSelectorMode.LIST,
                         )

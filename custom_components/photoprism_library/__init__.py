@@ -10,6 +10,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
@@ -30,10 +31,10 @@ from .const import (
     DEFAULT_RANDOM_COUNT,
     DEFAULT_SKIP_SCREENSHOTS,
     DOMAIN,
+    ISSUE_APP_PASSWORD_NEEDED,
     PHOTOPRISM_APP_PASSWORD,
-    PHOTOPRISM_INTEGRATION,
-    PHOTOPRISM_INTEGRATION_DOMAIN,
     PHOTOPRISM_NONE,
+    PHOTOPRISM_REMOVED_INTEGRATION,
 )
 from .favorites import async_get_favorites
 from .library import PhotoLibrary
@@ -71,23 +72,40 @@ def split_folders(value: str | list[str] | None) -> list[str]:
 
 
 def _photoprism_client(hass: HomeAssistant, options: dict) -> PhotoPrismClient | None:
-    mode = options.get(CONF_PHOTOPRISM, PHOTOPRISM_NONE)
-    if mode == PHOTOPRISM_APP_PASSWORD and options.get(CONF_PHOTOPRISM_URL) and options.get(CONF_PHOTOPRISM_TOKEN):
-        return PhotoPrismClient(hass, options[CONF_PHOTOPRISM_URL], token=options[CONF_PHOTOPRISM_TOKEN])
-    if mode == PHOTOPRISM_INTEGRATION:
-        for entry in hass.config_entries.async_entries(PHOTOPRISM_INTEGRATION_DOMAIN):
-            data = entry.data
-            if data.get("url"):
-                return PhotoPrismClient(
-                    hass,
-                    data["url"],
-                    token=data.get("token") or data.get("api_key"),
-                    username=data.get("username"),
-                    password=data.get("password"),
-                    verify_ssl=data.get("verify_ssl", True),
-                )
-        _LOGGER.warning("PhotoPrism integration not found; deleting will only remove files")
+    if (
+        options.get(CONF_PHOTOPRISM, PHOTOPRISM_NONE) == PHOTOPRISM_APP_PASSWORD
+        and options.get(CONF_PHOTOPRISM_URL)
+        and options.get(CONF_PHOTOPRISM_TOKEN)
+    ):
+        return PhotoPrismClient(hass, options[CONF_PHOTOPRISM_URL], options[CONF_PHOTOPRISM_TOKEN])
     return None
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """1.2: the option that reused the PhotoPrism integration's login is gone; such entries delete files only."""
+    if entry.version > 1:
+        return False  # made by a newer version
+    if entry.minor_version < 2:
+        data, options = dict(entry.data), dict(entry.options)
+        moved = False
+        for values in (data, options):
+            if values.get(CONF_PHOTOPRISM) == PHOTOPRISM_REMOVED_INTEGRATION:
+                values[CONF_PHOTOPRISM] = PHOTOPRISM_NONE
+                moved = True
+        hass.config_entries.async_update_entry(entry, data=data, options=options, minor_version=2)
+        if moved and {**data, **options}.get(CONF_ALLOW_DELETE):
+            # Stays until the user picks an app password, turns deleting off or ignores it in Repairs.
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                ISSUE_APP_PASSWORD_NEEDED,
+                is_fixable=False,
+                is_persistent=True,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_APP_PASSWORD_NEEDED,
+                learn_more_url="https://github.com/tomek7667/home-assistant-photoprism#deleting-photos",
+            )
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -102,6 +120,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     lib.allow_delete = bool(options.get(CONF_ALLOW_DELETE, False))
     lib.photoprism = _photoprism_client(hass, options) if lib.allow_delete else None
+    if lib.photoprism is not None or not lib.allow_delete:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_PASSWORD_NEEDED)
     url = (options.get(CONF_SIMILARITY_URL) or "").strip()
     lib.similarity = SimilarityClient(hass, url, options.get(CONF_SIMILARITY_TOKEN)) if url else None
     lib.similar_view = (options.get(CONF_SIMILAR_VIEW) or "").strip()
@@ -146,6 +166,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_PASSWORD_NEEDED)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

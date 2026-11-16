@@ -50,7 +50,6 @@
       }
     },
     "error": {
-      "photoprism_integration_missing": "The PhotoPrism integration is not set up.",
       "photoprism_app_password_missing": "Enter the PhotoPrism URL and an app password."
     }
   },
@@ -58,7 +57,6 @@
     "photoprism": {
       "options": {
         "none": "No, only delete the files",
-        "integration": "Yes, using the PhotoPrism integration's connection",
         "app_password": "Yes, with an app password"
       }
     }
@@ -68,6 +66,12 @@
       "similarity_index": {
         "name": "Similar photos analysed"
       }
+    }
+  },
+  "issues": {
+    "photoprism_app_password_needed": {
+      "title": "Deleting no longer removes photos from PhotoPrism",
+      "description": "Photo deletion used the PhotoPrism integration's login, which this integration no longer reads. Until you give it its own access, deleting a photo removes only its files and PhotoPrism keeps the photo until its next index or cleanup.\n\nTo fix it, create an app password in PhotoPrism (Settings → Account → Apps and Devices), then open this integration's options, choose \"Yes, with an app password\" and enter the PhotoPrism URL and the app password. If deleting files only is what you want, ignore this message."
     }
   }
 }

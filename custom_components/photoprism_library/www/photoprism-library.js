@@ -818,13 +818,14 @@ class PhotoPrismLibraryViewer extends HTMLElement {
     this.shadowRoot.innerHTML = `<style>${BUTTON_CSS}${CARD_CSS}${VIEWER_CSS}${
       fill ? "ha-card { border-radius: 0; border: none; box-shadow: none; }" : ""
     }</style>
-      <ha-card><div class="ppl-host ppl-viewer ppl-loading${fill ? " fill" : ""}"${fill ? "" : ` style="aspect-ratio:${ratio}"`}>
+      <ha-card><div class="ppl-host ppl-viewer ppl-loading${fill ? " fill" : ""}">
         <img class="bg" alt=""><img class="photo" alt=""><img class="photo" alt="">
         <video class="video" playsinline controls preload="metadata"></video>
         <div class="ppl-count"></div><div class="ppl-year"></div><div class="ppl-spinner"></div>
         <div class="ppl-empty"></div>
       </div></ha-card>`;
     const host = this.shadowRoot.querySelector(".ppl-viewer");
+    if (!fill) host.style.aspectRatio = ratio; // a property, not markup: config text never becomes HTML
     this._host = host;
     this._bg = host.querySelector(".bg");
     this._layers = [...host.querySelectorAll(".photo")];
@@ -1364,6 +1365,11 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       source: "favorites", tile_size: 140, min_similarity: 30, max_similarity: 100, similarity: 80, limit: 300,
       ...config,
     };
+    for (const [key, fallback] of [["min_similarity", 30], ["max_similarity", 100], ["similarity", 80]]) {
+      const raw = this._config[key]; // numbers only from here on; empty, null or junk keeps the default
+      const value = typeof raw === "number" || (typeof raw === "string" && raw.trim()) ? Number(raw) : NaN;
+      this._config[key] = Number.isFinite(value) ? value : fallback;
+    }
     this._similar = this._config.source === "similar";
     this._folderMode = this._config.source === "folder";
     this._folder = null; // folder: the one shown
@@ -1431,7 +1437,6 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       if (s === "added" && this._folderMode) return t.sortAlbum;
       return t[`sort${s[0].toUpperCase()}${s.slice(1)}`];
     };
-    const { min_similarity: lo, max_similarity: hi } = this._config;
     this.shadowRoot.innerHTML = `<style>${BUTTON_CSS}${GRID_CSS}${SIMILAR_CSS}</style>
       <ha-card style="--ppl-tile:${Number(this._config.tile_size) || 140}px">
         <div class="head">
@@ -1443,7 +1448,7 @@ class PhotoPrismLibraryGrid extends HTMLElement {
         <div class="body"></div>
         ${this._similar ? `<div class="slider">
           <div class="row"><span>${t.similarity} ≥ <b class="value"></b></span><span class="found"></span></div>
-          <input type="range" min="${lo}" max="${hi}" step="1" aria-label="${t.similarity}">
+          <input type="range" step="1" aria-label="${t.similarity}">
           <div class="hints"><span>${t.loose}</span><span>${t.near}</span></div>
         </div>` : ""}
         <div class="actions">
@@ -1486,6 +1491,8 @@ class PhotoPrismLibraryGrid extends HTMLElement {
       this._range = root.querySelector(".slider input");
       this._value = root.querySelector(".slider .value");
       this._found = root.querySelector(".slider .found");
+      this._range.min = String(this._config.min_similarity); // set as properties, never as markup
+      this._range.max = String(this._config.max_similarity);
       this._range.value = String(this._threshold);
       this._value.textContent = `${this._threshold}%`;
       let timer;
@@ -1755,7 +1762,7 @@ class PhotoPrismLibraryGrid extends HTMLElement {
     this._body.innerHTML = "";
     let index = 0;
     for (const group of groups) {
-      if (group.label) this._body.insertAdjacentHTML("beforeend", `<div class="year">${group.label}</div>`);
+      if (group.label) this._body.insertAdjacentHTML("beforeend", `<div class="year">${esc(group.label)}</div>`);
       const tiles = document.createElement("div");
       tiles.className = "tiles";
       for (const item of group.items) tiles.appendChild(this._tile(item, items, index++));

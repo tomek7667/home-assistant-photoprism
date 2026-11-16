@@ -14,9 +14,11 @@ CONF_PHOTOPRISM = "photoprism"
 CONF_PHOTOPRISM_URL = "photoprism_url"
 CONF_PHOTOPRISM_TOKEN = "photoprism_token"
 PHOTOPRISM_NONE = "none"  # files only, PhotoPrism is not told
-PHOTOPRISM_INTEGRATION = "integration"  # reuse the PhotoPrism integration's connection
 PHOTOPRISM_APP_PASSWORD = "app_password"
-PHOTOPRISM_INTEGRATION_DOMAIN = "photoprism"
+# Before 1.6.0 an option reused the PhotoPrism integration's stored login. An integration must not use
+# another integration's credentials, so entries with it are moved to "none" and get a repair issue.
+PHOTOPRISM_REMOVED_INTEGRATION = "integration"
+ISSUE_APP_PASSWORD_NEEDED = "photoprism_app_password_needed"
 
 # Similar photos: the sidecar service (see similarity/) and the dashboard view that shows them
 CONF_SIMILARITY_URL = "similarity_url"

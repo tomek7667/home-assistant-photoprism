@@ -27,55 +27,21 @@ class PhotoPrismError(Exception):
 
 
 class PhotoPrismClient:
-    """Talks to PhotoPrism with an app password or a username and password."""
+    """Talks to PhotoPrism with an app password made for this integration."""
 
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        url: str,
-        *,
-        token: str | None = None,
-        username: str | None = None,
-        password: str | None = None,
-        verify_ssl: bool = True,
-    ) -> None:
+    def __init__(self, hass: HomeAssistant, url: str, app_password: str) -> None:
         self._hass = hass
         self._url = url.rstrip("/")
-        self._app_token = token
-        self._username = username
-        self._password = password
-        self._verify_ssl = verify_ssl
-        self._session_token: str | None = None
+        self._app_password = app_password
 
-    async def _token(self, renew: bool = False) -> str:
-        if self._app_token:
-            return self._app_token
-        if self._session_token and not renew:
-            return self._session_token
-        if not (self._username and self._password):
-            raise PhotoPrismError("No PhotoPrism credentials")
-        data = await self._request(
-            "POST", "/api/v1/session", json={"username": self._username, "password": self._password}, auth=False
-        )
-        token = data.get("access_token") or data.get("id")
-        if not token:
-            raise PhotoPrismError("PhotoPrism login returned no token")
-        self._session_token = token
-        return token
-
-    async def _request(self, method: str, path: str, *, auth: bool = True, retry: bool = True, **kwargs: Any) -> Any:
-        headers = {}
-        if auth:
-            token = await self._token()
-            headers = {"Authorization": f"Bearer {token}", "X-Auth-Token": token, "X-Session-ID": token}
-        session = async_get_clientsession(self._hass, verify_ssl=self._verify_ssl)
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        token = self._app_password
+        headers = {"Authorization": f"Bearer {token}", "X-Auth-Token": token, "X-Session-ID": token}
+        session = async_get_clientsession(self._hass)
         try:
             async with session.request(
                 method, f"{self._url}{path}", headers=headers, timeout=aiohttp.ClientTimeout(total=30), **kwargs
             ) as resp:
-                if resp.status == 401 and auth and retry and not self._app_token:
-                    await self._token(renew=True)
-                    return await self._request(method, path, auth=auth, retry=False, **kwargs)
                 text = await resp.text()
                 if resp.status >= 400:
                     raise PhotoPrismError(f"{method} {path}: HTTP {resp.status} {text[:200]}")

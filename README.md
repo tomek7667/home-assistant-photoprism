@@ -63,7 +63,7 @@ The library appears in **Media → PhotoPrism Library**.
 | Photos in the Random folder | 500 | 10 – 5000 |
 | Leave PNG/GIF out of On this day and Random | on | Phone screenshots are usually PNG |
 | Allow deleting photos | off | See below |
-| Also delete in PhotoPrism | no | *No* (files only), *the PhotoPrism integration's connection*, or *an app password* |
+| Also delete in PhotoPrism | no | *No* (files only) or *an app password* |
 | Dashboard view for albums as a grid | – | Path of a view with a grid card (`source: folder`), e.g. `/photos/album`; turns on the ▦ button, see [Album grid](#album-grid) |
 
 ## Deleting photos
@@ -71,9 +71,9 @@ The library appears in **Media → PhotoPrism Library**.
 Deleting is off by default. To use it:
 
 1. Mount the photo folders **writable** (no `:ro`), including the extra allowed folders that links point to.
-2. Open the integration options and turn on **Allow deleting photos**. Choose how PhotoPrism is told:
-   - reuse the connection of the [PhotoPrism integration](https://github.com/ice413/hass-photoprism), if you have it set up, or
-   - an **app password** (PhotoPrism: *Settings → Account → Apps and Devices*) with the PhotoPrism URL.
+2. Open the integration options and turn on **Allow deleting photos**. To remove photos from PhotoPrism as well, choose **app password** and enter the PhotoPrism URL and an app password made for this integration (PhotoPrism: *Settings → Account → Apps and Devices*). Without one, only the files are deleted and PhotoPrism keeps the photo until its next index or cleanup.
+
+   Versions before 1.6.0 could reuse the PhotoPrism integration's login instead. That option is gone: an entry that used it is switched to files only, and *Settings → Repairs* asks for an app password.
 3. Reload the browser. Every logged-in user now sees a trash button when hovering over a photo preview (media browser), the viewer, the grid's full-screen view and the `photoprism-library-slideshow` card.
 
 The button first lists every file that will be deleted and asks for confirmation. Then it:

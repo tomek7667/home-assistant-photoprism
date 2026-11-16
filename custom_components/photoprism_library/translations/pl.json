@@ -50,7 +50,6 @@
       }
     },
     "error": {
-      "photoprism_integration_missing": "Integracja PhotoPrism nie jest skonfigurowana.",
       "photoprism_app_password_missing": "Podaj adres PhotoPrism i hasło aplikacji."
     }
   },
@@ -58,7 +57,6 @@
     "photoprism": {
       "options": {
         "none": "Nie, usuwaj tylko pliki",
-        "integration": "Tak, przez połączenie integracji PhotoPrism",
         "app_password": "Tak, hasłem aplikacji"
       }
     }
@@ -68,6 +66,12 @@
       "similarity_index": {
         "name": "Przeanalizowane zdjęcia (podobne)"
       }
+    }
+  },
+  "issues": {
+    "photoprism_app_password_needed": {
+      "title": "Usuwanie nie usuwa już zdjęć z PhotoPrism",
+      "description": "Usuwanie zdjęć korzystało z logowania integracji PhotoPrism, którego ta integracja już nie odczytuje. Dopóki nie dostanie własnego dostępu, usunięcie zdjęcia kasuje tylko jego pliki, a PhotoPrism trzyma zdjęcie do najbliższego indeksowania lub czyszczenia.\n\nAby to naprawić, utwórz hasło aplikacji w PhotoPrism (Ustawienia → Konto → Aplikacje i urządzenia), otwórz opcje tej integracji, wybierz „Tak, hasłem aplikacji” i podaj adres PhotoPrism oraz hasło aplikacji. Jeśli usuwanie samych plików Ci wystarcza, zignoruj ten komunikat."
     }
   }
 }
